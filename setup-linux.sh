@@ -79,7 +79,8 @@ install_packages \
     wget \
     git \
     ca-certificates \
-    zsh
+    zsh \
+    ImageMagick
 
 if command_exists dnf; then
     install_packages dnf-plugins-core
@@ -219,20 +220,90 @@ else
 fi
 
 # =========================================================
-# 8 — FASTFETCH
+# 8 — WALLPAPER RANDOM FEDORA
 # =========================================================
 
-print_status "Instalando Fastfetch..."
+if [ "$DISTRO" = "fedora" ]; then
 
-if ! command_exists fastfetch; then
-    install_packages fastfetch
-    print_success "Fastfetch instalado"
-else
-    print_success "Fastfetch já instalado"
+    print_status "Configurando wallpaper aleatório do Fedora..."
+
+    mkdir -p "$HOME/.local/bin"
+    mkdir -p "$HOME/.config/systemd/user"
+
+    cat > "$HOME/.local/bin/random-wallpaper" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+MIN_WIDTH=1920
+MIN_HEIGHT=1080
+
+IMG="$(
+find /usr/share/backgrounds -type f \
+  \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.webp" \) \
+  ! -iname "*-dark*" \
+  ! -iname "*-light*" \
+  ! -iname "*thumbnail*" \
+  ! -iname "*symbolic*" \
+  ! -iname "*lockscreen*" \
+  -size +1M \
+  -print0 |
+while IFS= read -r -d '' file; do
+
+  read width height < <(
+    identify -format "%w %h" "$file" 2>/dev/null || echo "0 0"
+  )
+
+  if [ "$width" -ge "$MIN_WIDTH" ] && [ "$height" -ge "$MIN_HEIGHT" ]; then
+    echo "$file"
+  fi
+
+done |
+shuf -n 1
+)"
+
+if [ -z "${IMG:-}" ]; then
+  exit 1
+fi
+
+gsettings set org.gnome.desktop.background picture-options 'zoom'
+gsettings set org.gnome.desktop.background picture-uri "file://$IMG"
+gsettings set org.gnome.desktop.background picture-uri-dark "file://$IMG"
+EOF
+
+    chmod +x "$HOME/.local/bin/random-wallpaper"
+
+    cat > "$HOME/.config/systemd/user/random-wallpaper.service" <<'EOF'
+[Unit]
+Description=Wallpaper aleatório Fedora
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/random-wallpaper
+EOF
+
+    cat > "$HOME/.config/systemd/user/random-wallpaper.timer" <<'EOF'
+[Unit]
+Description=Timer wallpaper aleatório Fedora
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    systemctl --user daemon-reload
+    systemctl --user enable --now random-wallpaper.timer
+    systemctl --user start random-wallpaper.service
+
+    print_success "Wallpaper aleatório configurado"
+
 fi
 
 # =========================================================
-# 10 — ZED EDITOR
+# 9 — ZED EDITOR
 # =========================================================
 
 print_status "Instalando Zed..."
@@ -262,7 +333,6 @@ mvn --version || true
 docker --version || true
 docker compose version || true
 zsh --version || true
-fastfetch --version || true
 
 if command_exists zed; then
     zed --version || true
