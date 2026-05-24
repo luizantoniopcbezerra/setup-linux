@@ -245,7 +245,6 @@ find /usr/share/backgrounds -type f \
   ! -iname "*thumbnail*" \
   ! -iname "*symbolic*" \
   ! -iname "*lockscreen*" \
-  -size +1M \
   -print0 |
 while IFS= read -r -d '' file; do
 
