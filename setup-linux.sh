@@ -79,7 +79,6 @@ install_packages \
     wget \
     git \
     ca-certificates \
-    zsh \
     ImageMagick
 
 if command_exists dnf; then
@@ -249,7 +248,6 @@ java --version || true
 mvn --version || true
 docker --version || true
 docker compose version || true
-zsh --version || true
 
 if command_exists zed; then
     zed --version || true
