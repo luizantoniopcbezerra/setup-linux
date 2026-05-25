@@ -219,19 +219,6 @@ else
 fi
 
 # =========================================================
-# 9 — ZED EDITOR
-# =========================================================
-
-print_status "Instalando Zed..."
-
-if ! command_exists zed; then
-    curl -f https://zed.dev/install.sh | sh
-    print_success "Zed instalado"
-else
-    print_success "Zed já instalado"
-fi
-
-# =========================================================
 # FINALIZAÇÃO
 # =========================================================
 
