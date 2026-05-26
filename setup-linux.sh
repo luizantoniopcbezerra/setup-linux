@@ -219,6 +219,50 @@ else
 fi
 
 # =========================================================
+# 8 — FLATPAK + APPS
+# =========================================================
+
+print_status "Configurando Flatpak..."
+
+if ! command_exists flatpak; then
+    install_packages flatpak
+fi
+
+# Flathub
+if ! flatpak remote-list | grep -q flathub; then
+    sudo flatpak remote-add --if-not-exists flathub \
+        https://flathub.org/repo/flathub.flatpakrepo
+fi
+
+print_success "Flatpak configurado"
+
+# ---------------------------------------------------------
+# Obsidian
+# ---------------------------------------------------------
+
+print_status "Instalando Obsidian..."
+
+if ! flatpak list | grep -q md.obsidian.Obsidian; then
+    flatpak install -y flathub md.obsidian.Obsidian
+    print_success "Obsidian instalado"
+else
+    print_success "Obsidian já instalado"
+fi
+
+# ---------------------------------------------------------
+# IntelliJ IDEA Community (Open)
+# ---------------------------------------------------------
+
+print_status "Instalando IntelliJ IDEA Community..."
+
+if ! flatpak list | grep -q com.jetbrains.IntelliJ-IDEA-Community; then
+    flatpak install -y flathub com.jetbrains.IntelliJ-IDEA-Community
+    print_success "IntelliJ IDEA Community instalado"
+else
+    print_success "IntelliJ IDEA Community já instalado"
+fi
+
+# =========================================================
 # FINALIZAÇÃO
 # =========================================================
 
@@ -235,6 +279,7 @@ java --version || true
 mvn --version || true
 docker --version || true
 docker compose version || true
+flatpak --version || true
 
 if command_exists zed; then
     zed --version || true
