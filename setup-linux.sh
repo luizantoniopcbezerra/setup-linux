@@ -282,7 +282,9 @@ if command_exists dnf; then
         dex \
         fontconfig \
         maim \
-        slop
+        slop \
+        papirus-icon-theme \
+        fastfetch
 elif command_exists apt; then
     install_packages \
         i3 \
@@ -296,7 +298,9 @@ elif command_exists apt; then
         dex \
         fontconfig \
         maim \
-        slop
+        slop \
+        papirus-icon-theme \
+        fastfetch
 fi
 
 print_success "i3 instalado"
@@ -352,7 +356,7 @@ font pango:JetBrainsMono Nerd Font Mono 10
 
 exec --no-startup-id dex --autostart --environment i3
 exec --no-startup-id picom -b
-exec --no-startup-id xss-lock --transfer-sleep-lock -- i3lock --nofork
+exec --no-startup-id xss-lock --transfer-sleep-lock -- ~/.local/bin/lock.sh
 exec --no-startup-id nm-applet
 
 set $refresh_i3status killall -SIGUSR1 i3status
@@ -455,6 +459,7 @@ bindsym F3 exec --no-startup-id brightnessctl set 5%-
 bindsym F4 exec --no-startup-id brightnessctl set +5%
 
 bindsym Print exec maim -s ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png
+bindsym $mod+Shift+x exec --no-startup-id ~/.local/bin/lock.sh
 
 client.focused          #7aab7a #0d1a0d #e0f0e0 #7aab7a #7aab7a
 client.unfocused        #0d0d0d #0d0d0d #3a4a3a #0d0d0d #0d0d0d
@@ -574,7 +579,20 @@ fade-in-step = 0.05;
 fade-out-step = 0.05;
 fade-delta = 8;
 
-shadow = false;
+shadow = true;
+shadow-radius = 12;
+shadow-opacity = 0.35;
+shadow-offset-x = -8;
+shadow-offset-y = -8;
+shadow-exclude = [
+    "class_g = 'i3-frame'",
+    "class_g = 'i3bar'"
+];
+
+corner-radius = 10;
+rounded-corners-exclude = [
+    "class_g = 'i3bar'"
+];
 EOF
 
 # ---------------------------------------------------------
@@ -757,6 +775,77 @@ print_success "Configuração do i3 aplicada"
 print_warning "Defina o wallpaper em ~/.config/i3/config (exec feh --bg-scale /caminho/wallpaper.png)"
 
 # =========================================================
+# 12 — LOCK SCREEN (i3lock com blur)
+# =========================================================
+
+print_status "Configurando lock screen..."
+
+mkdir -p "$HOME/.local/bin"
+
+cat > "$HOME/.local/bin/lock.sh" << 'EOF'
+#!/bin/bash
+TMPBG=/tmp/lockscreen.png
+maim "$TMPBG"
+magick "$TMPBG" -blur 0x10 "$TMPBG"
+i3lock -i "$TMPBG" --nofork
+rm -f "$TMPBG"
+EOF
+
+chmod +x "$HOME/.local/bin/lock.sh"
+
+# garantir que ~/.local/bin está no PATH
+if ! grep -q 'HOME/.local/bin' "$HOME/.bashrc" 2>/dev/null; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+fi
+
+print_success "Lock screen configurado (Super+Shift+X para bloquear)"
+
+# =========================================================
+# 13 — FASTFETCH
+# =========================================================
+
+print_status "Configurando fastfetch..."
+
+mkdir -p "$HOME/.config/fastfetch"
+
+cat > "$HOME/.config/fastfetch/config.jsonc" << 'EOF'
+{
+    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+    "logo": {
+        "type": "auto",
+        "padding": { "top": 1 },
+        "color": { "1": "bright_green", "2": "green" }
+    },
+    "display": {
+        "separator": "  ",
+        "color": { "keys": "green", "title": "green" }
+    },
+    "modules": [
+        { "type": "title",    "format": "{user-name}@{host-name}" },
+        "separator",
+        { "type": "os",       "key": "󰣇  OS      " },
+        { "type": "kernel",   "key": "  Kernel  " },
+        { "type": "wm",       "key": "  WM      " },
+        { "type": "terminal", "key": "  Term    " },
+        { "type": "shell",    "key": "  Shell   " },
+        { "type": "cpu",      "key": "󰍛  CPU     " },
+        { "type": "memory",   "key": "󰘙  RAM     " },
+        { "type": "disk",     "key": "󰋊  Disk    " },
+        { "type": "uptime",   "key": "  Uptime  " },
+        "separator",
+        "colors"
+    ]
+}
+EOF
+
+if ! grep -q 'fastfetch' "$HOME/.bashrc" 2>/dev/null; then
+    echo '' >> "$HOME/.bashrc"
+    echo 'command -v fastfetch &>/dev/null && fastfetch' >> "$HOME/.bashrc"
+fi
+
+print_success "fastfetch configurado"
+
+# =========================================================
 # FINALIZAÇÃO
 # =========================================================
 
@@ -774,6 +863,7 @@ mvn --version || true
 docker --version || true
 docker compose version || true
 flatpak --version || true
+fastfetch --version || true
 
 if command_exists zed; then
     zed --version || true
