@@ -1,873 +1,149 @@
 #!/bin/bash
+
+# Script completo para configuração do ambiente de desenvolvimento Ubuntu
+# Autor: Guilherme Celso
+# Descrição: Automatiza a instalação de todas as ferramentas essenciais
+
 set -e
 
-print_status() { echo "[...] $1"; }
-print_success() { echo "[OK] $1"; }
-print_warning() { echo "[WARN] $1"; }
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
+print_status()  { echo -e "${BLUE}🔧 $1${NC}"; }
+print_success() { echo -e "${GREEN}✅ $1${NC}"; }
+print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+print_error()   { echo -e "${RED}❌ $1${NC}"; }
 
-package_installed() {
-    local pkg="$1"
+command_exists()   { command -v "$1" >/dev/null 2>&1; }
+package_installed() { dpkg -l | grep -q "^ii  $1 "; }
 
-    if command_exists dnf; then
-        rpm -q "$pkg" >/dev/null 2>&1
-    elif command_exists apt; then
-        dpkg -s "$pkg" >/dev/null 2>&1
-    else
-        return 1
-    fi
-}
-
-# =========================================================
-# DETECÇÃO DA DISTRO
-# =========================================================
-
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    DISTRO=$ID
-else
-    echo "❌ Não foi possível detectar a distribuição Linux."
-    exit 1
-fi
-
-echo "🚀 Iniciando configuração do ambiente de desenvolvimento..."
-echo "🐧 Distribuição detectada: $DISTRO"
+echo "🚀 Iniciando configuração completa do ambiente de desenvolvimento Ubuntu..."
+echo "⏱️  Este processo pode levar alguns minutos..."
 echo ""
 
-# =========================================================
-# HELPERS DE PACOTE
-# =========================================================
+# ====================================
+# 1. ATUALIZAÇÃO DO SISTEMA
+# ====================================
+print_status "Atualizando o sistema..."
+sudo apt update && sudo apt upgrade -y
+print_success "Sistema atualizado!"
 
-install_packages() {
-    if command_exists dnf; then
-        sudo dnf install -y "$@"
-    elif command_exists apt; then
-        sudo apt install -y "$@"
-    else
-        echo "❌ Gerenciador de pacotes não suportado."
-        exit 1
-    fi
-}
-
-update_system() {
-    if command_exists dnf; then
-        sudo dnf upgrade --refresh -y
-    elif command_exists apt; then
-        sudo apt update && sudo apt upgrade -y
-    fi
-}
-
-# =========================================================
-# 1 — ATUALIZAÇÃO DO SISTEMA
-# =========================================================
-
-print_status "Atualizando sistema..."
-update_system
-print_success "Sistema atualizado"
-
-# =========================================================
-# 2 — DEPENDÊNCIAS BASE
-# =========================================================
-
-print_status "Instalando dependências básicas..."
-
-install_packages \
-    curl \
-    wget \
-    git \
-    ca-certificates \
-    ImageMagick \
-    unzip
-
-if command_exists dnf; then
-    install_packages dnf-plugins-core
+# ====================================
+# 2. CURL
+# ====================================
+print_status "Verificando/Instalando CURL..."
+if ! command_exists curl; then
+    sudo apt install -y curl
+    print_success "CURL instalado!"
+else
+    print_success "CURL já está instalado!"
 fi
 
-print_success "Dependências instaladas"
+# ====================================
+# 3. GIT
+# ====================================
+print_status "Verificando/Instalando GIT..."
+if ! command_exists git; then
+    sudo apt install -y git
+    print_success "GIT instalado!"
+else
+    print_success "GIT já está instalado!"
+fi
 
-# =========================================================
-# 3 — CONFIGURAÇÃO DO GIT
-# =========================================================
-
-print_status "Configurando Git"
-
-read -rp "Nome Git: " git_username
-read -rp "Email Git: " git_email
+print_status "Configurando GIT..."
+echo ""
+echo "🔧 Configuração do Git:"
+read -p "Digite seu nome de usuário Git: " git_username
+read -p "Digite seu email Git: " git_email
 
 if [ -n "$git_username" ] && [ -n "$git_email" ]; then
     git config --global user.name "$git_username"
     git config --global user.email "$git_email"
-    print_success "Git configurado"
+    print_success "GIT configurado com usuário: $git_username ($git_email)"
 else
-    print_warning "Git não configurado"
+    print_warning "Nome ou email não informados. Configure manualmente depois com:"
+    echo "  git config --global user.name 'Seu Nome'"
+    echo "  git config --global user.email 'seu.email@exemplo.com'"
 fi
+echo ""
 
-# =========================================================
-# 4 — DOCKER
-# =========================================================
-
-print_status "Instalando Docker..."
-
+# ====================================
+# 4. DOCKER
+# ====================================
+print_status "Verificando/Instalando Docker..."
 if ! command_exists docker; then
+    sudo apt install -y apt-transport-https ca-certificates curl gnupg lsb-release
 
-    if command_exists dnf; then
-        sudo dnf remove -y \
-            docker \
-            docker-client \
-            docker-client-latest \
-            docker-common \
-            docker-latest \
-            docker-latest-logrotate \
-            docker-logrotate \
-            docker-selinux \
-            docker-engine-selinux \
-            docker-engine \
-            podman-docker || true
+    sudo install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
-        sudo dnf config-manager addrepo \
-            --from-repofile=https://download.docker.com/linux/fedora/docker-ce.repo
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+        | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-        install_packages \
-            docker-ce \
-            docker-ce-cli \
-            containerd.io \
-            docker-buildx-plugin \
-            docker-compose-plugin
+    sudo apt update
+    sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-    elif command_exists apt; then
-        sudo apt remove -y docker docker-engine docker.io containerd runc || true
-
-        sudo install -m 0755 -d /etc/apt/keyrings
-
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-            | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-
-        sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-        echo \
-          "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-          https://download.docker.com/linux/ubuntu \
-          $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
-          | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-        sudo apt update
-
-        install_packages \
-            docker-ce \
-            docker-ce-cli \
-            containerd.io \
-            docker-buildx-plugin \
-            docker-compose-plugin
-    fi
-
-    sudo systemctl enable --now docker
+    sudo systemctl start docker && sudo systemctl enable docker
     sudo usermod -aG docker "$USER"
+    # Nota: chmod 666 no socket é inseguro; o grupo docker é suficiente após relogin
 
-    print_success "Docker instalado"
-    print_warning "Faça logout/login para usar Docker sem sudo"
-
+    print_success "Docker instalado!"
 else
-    print_success "Docker já instalado"
+    print_success "Docker já está instalado!"
 fi
 
-# =========================================================
-# 5 — NODE.JS E NPM
-# =========================================================
-
-print_status "Instalando Node.js e npm..."
-
-if ! command_exists node; then
-    install_packages nodejs npm
-    print_success "Node.js instalado"
+# ====================================
+# 5. NODE.JS 24 LTS (Krypton)
+# ====================================
+print_status "Verificando/Instalando Node.js 24 LTS..."
+if ! command_exists node || [[ "$(node --version)" != v24* ]]; then
+    curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+    print_success "Node.js 24 LTS instalado!"
 else
-    print_success "Node.js já instalado"
+    print_success "Node.js 24 LTS já está instalado!"
 fi
 
-# =========================================================
-# 6 — JAVA 21
-# =========================================================
-
-print_status "Instalando Java 21..."
-
-if ! command_exists java; then
-
-    if command_exists dnf; then
-        install_packages java-21-openjdk java-21-openjdk-devel
-    elif command_exists apt; then
-        install_packages openjdk-21-jdk
-    fi
-
-    print_success "Java 21 instalado"
-
+# ====================================
+# 6. DIODON
+# ====================================
+print_status "Verificando/Instalando Diodon..."
+if ! package_installed diodon; then
+    sudo apt install -y diodon
+    print_success "Diodon instalado!"
 else
-    print_success "Java já instalado"
+    print_success "Diodon já está instalado!"
 fi
 
-# =========================================================
-# 7 — MAVEN
-# =========================================================
-
-print_status "Instalando Maven..."
-
-if ! command_exists mvn; then
-    install_packages maven
-    print_success "Maven instalado"
-else
-    print_success "Maven já instalado"
-fi
-
-# =========================================================
-# 8 — FLATPAK + APPS
-# =========================================================
-
-print_status "Configurando Flatpak..."
-
-if ! command_exists flatpak; then
-    install_packages flatpak
-fi
-
-# Flathub
-if ! flatpak remote-list | grep -q flathub; then
-    sudo flatpak remote-add --if-not-exists flathub \
-        https://flathub.org/repo/flathub.flatpakrepo
-fi
-
-print_success "Flatpak configurado"
-
-# ---------------------------------------------------------
-# Obsidian
-# ---------------------------------------------------------
-
-print_status "Instalando Obsidian..."
-
-if ! flatpak list | grep -q md.obsidian.Obsidian; then
-    flatpak install -y flathub md.obsidian.Obsidian
-    print_success "Obsidian instalado"
-else
-    print_success "Obsidian já instalado"
-fi
-
-# ---------------------------------------------------------
-# IntelliJ IDEA Community (Open)
-# ---------------------------------------------------------
-
-print_status "Instalando IntelliJ IDEA Community..."
-
-if ! flatpak list | grep -q com.jetbrains.IntelliJ-IDEA-Community; then
-    flatpak install -y flathub com.jetbrains.IntelliJ-IDEA-Community
-    print_success "IntelliJ IDEA Community instalado"
-else
-    print_success "IntelliJ IDEA Community já instalado"
-fi
-
-# =========================================================
-# 9 — I3 + DEPENDÊNCIAS
-# =========================================================
-
-print_status "Instalando i3 e dependências..."
-
-if command_exists dnf; then
-    install_packages \
-        i3 \
-        i3status \
-        rofi \
-        feh \
-        picom \
-        xss-lock \
-        network-manager-applet \
-        brightnessctl \
-        dex \
-        fontconfig \
-        maim \
-        slop \
-        papirus-icon-theme \
-        fastfetch
-elif command_exists apt; then
-    install_packages \
-        i3 \
-        i3status \
-        rofi \
-        feh \
-        picom \
-        xss-lock \
-        network-manager-gnome \
-        brightnessctl \
-        dex \
-        fontconfig \
-        maim \
-        slop \
-        papirus-icon-theme \
-        fastfetch
-fi
-
-print_success "i3 instalado"
-
-# =========================================================
-# 10 — JETBRAINS MONO NERD FONT
-# =========================================================
-
-print_status "Instalando JetBrainsMono Nerd Font..."
-
-NERD_FONT_VERSION="3.4.0"
-FONT_DIR="$HOME/.local/share/fonts/JetBrainsMonoNF"
-
-if ! fc-list | grep -q "JetBrainsMono Nerd Font"; then
-    mkdir -p "$FONT_DIR"
-    curl -fsSL \
-        "https://github.com/ryanoasis/nerd-fonts/releases/download/v${NERD_FONT_VERSION}/JetBrainsMono.zip" \
-        -o /tmp/JetBrainsMono.zip
-    unzip -o /tmp/JetBrainsMono.zip -d "$FONT_DIR"
-    rm /tmp/JetBrainsMono.zip
-    fc-cache -fv
-    print_success "JetBrainsMono Nerd Font instalada"
-else
-    print_success "JetBrainsMono Nerd Font já instalada"
-fi
-
-# =========================================================
-# 11 — CONFIGURAÇÃO DO I3
-# =========================================================
-
-print_status "Aplicando configuração do i3..."
-
-mkdir -p "$HOME/.config/i3"
-mkdir -p "$HOME/.config/i3status"
-
-# ---------------------------------------------------------
-# ~/.config/i3/config
-# ---------------------------------------------------------
-
-cat > "$HOME/.config/i3/config" << 'EOF'
-# i3 config file (v4)
-
-set $mod Mod4
-
-default_border pixel 1
-default_floating_border pixel 1
-for_window [class=".*"] border pixel 1
-
-gaps inner 10
-gaps outer 4
-
-font pango:JetBrainsMono Nerd Font Mono 10
-
-exec --no-startup-id dex --autostart --environment i3
-exec --no-startup-id picom -b
-exec --no-startup-id xss-lock --transfer-sleep-lock -- ~/.local/bin/lock.sh
-exec --no-startup-id nm-applet
-
-set $refresh_i3status killall -SIGUSR1 i3status
-bindsym XF86AudioRaiseVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ +10% && $refresh_i3status
-bindsym XF86AudioLowerVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ -10% && $refresh_i3status
-bindsym XF86AudioMute exec --no-startup-id pactl set-sink-mute @DEFAULT_SINK@ toggle && $refresh_i3status
-bindsym XF86AudioMicMute exec --no-startup-id pactl set-source-mute @DEFAULT_SOURCE@ toggle && $refresh_i3status
-
-floating_modifier $mod
-tiling_drag modifier titlebar
-
-bindsym $mod+Return exec i3-sensible-terminal
-bindsym $mod+Shift+q kill
-bindsym $mod+d exec --no-startup-id rofi -show drun
-
-bindsym $mod+j focus left
-bindsym $mod+k focus down
-bindsym $mod+l focus up
-bindsym $mod+semicolon focus right
-bindsym $mod+Left focus left
-bindsym $mod+Down focus down
-bindsym $mod+Up focus up
-bindsym $mod+Right focus right
-
-bindsym $mod+Shift+j move left
-bindsym $mod+Shift+k move down
-bindsym $mod+Shift+l move up
-bindsym $mod+Shift+semicolon move right
-bindsym $mod+Shift+Left move left
-bindsym $mod+Shift+Down move down
-bindsym $mod+Shift+Up move up
-bindsym $mod+Shift+Right move right
-
-bindsym $mod+h split h
-bindsym $mod+v split v
-bindsym $mod+f fullscreen toggle
-bindsym $mod+s layout stacking
-bindsym $mod+w layout tabbed
-bindsym $mod+e layout toggle split
-bindsym $mod+Shift+space floating toggle
-bindsym $mod+space focus mode_toggle
-bindsym $mod+a focus parent
-
-set $ws1 "1: 󰆍"
-set $ws2 "2: 󰈹"
-set $ws3 "3: 󰨞"
-set $ws4 "4: 󰭹"
-set $ws5 "5: 󰝚"
-set $ws6 "6"
-set $ws7 "7"
-set $ws8 "8"
-set $ws9 "9"
-set $ws10 "10"
-
-bindsym $mod+1 workspace number $ws1
-bindsym $mod+2 workspace number $ws2
-bindsym $mod+3 workspace number $ws3
-bindsym $mod+4 workspace number $ws4
-bindsym $mod+5 workspace number $ws5
-bindsym $mod+6 workspace number $ws6
-bindsym $mod+7 workspace number $ws7
-bindsym $mod+8 workspace number $ws8
-bindsym $mod+9 workspace number $ws9
-bindsym $mod+0 workspace number $ws10
-
-bindsym $mod+Shift+1 move container to workspace number $ws1
-bindsym $mod+Shift+2 move container to workspace number $ws2
-bindsym $mod+Shift+3 move container to workspace number $ws3
-bindsym $mod+Shift+4 move container to workspace number $ws4
-bindsym $mod+Shift+5 move container to workspace number $ws5
-bindsym $mod+Shift+6 move container to workspace number $ws6
-bindsym $mod+Shift+7 move container to workspace number $ws7
-bindsym $mod+Shift+8 move container to workspace number $ws8
-bindsym $mod+Shift+9 move container to workspace number $ws9
-bindsym $mod+Shift+0 move container to workspace number $ws10
-
-bindsym $mod+Shift+c reload
-bindsym $mod+Shift+r restart
-bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'Sair do i3?' -B 'Sim' 'i3-msg exit'"
-
-mode "resize" {
-    bindsym j resize shrink width 10 px or 10 ppt
-    bindsym k resize grow height 10 px or 10 ppt
-    bindsym l resize shrink height 10 px or 10 ppt
-    bindsym semicolon resize grow width 10 px or 10 ppt
-    bindsym Left resize shrink width 10 px or 10 ppt
-    bindsym Down resize grow height 10 px or 10 ppt
-    bindsym Up resize shrink height 10 px or 10 ppt
-    bindsym Right resize grow width 10 px or 10 ppt
-    bindsym Return mode "default"
-    bindsym Escape mode "default"
-    bindsym $mod+r mode "default"
-}
-
-bindsym $mod+r mode "resize"
-
-exec_always --no-startup-id setxkbmap br abnt2
-
-bindsym F3 exec --no-startup-id brightnessctl set 5%-
-bindsym F4 exec --no-startup-id brightnessctl set +5%
-
-bindsym Print exec maim -s ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png
-bindsym $mod+Shift+x exec --no-startup-id ~/.local/bin/lock.sh
-
-client.focused          #7aab7a #0d1a0d #e0f0e0 #7aab7a #7aab7a
-client.unfocused        #0d0d0d #0d0d0d #3a4a3a #0d0d0d #0d0d0d
-client.focused_inactive #1a2a1a #1a2a1a #5a7a5a #1a2a1a #1a2a1a
-client.urgent           #cc4444 #cc4444 #080808 #cc4444 #cc4444
-
-bar {
-    position top
-    height 26
-    tray_padding 4
-    separator_symbol "  "
-    font pango:JetBrainsMono Nerd Font Mono 10
-    status_command i3status
-    colors {
-        background #080808
-        statusline #c0d8c0
-        separator  #2a3a2a
-        focused_workspace  #7aab7a #0d1a0d  #e0f0e0
-        active_workspace   #3a5a3a #0d1a0d  #8aaa8a
-        inactive_workspace #080808 #080808  #3a4a3a
-        urgent_workspace   #cc4444 #cc4444  #080808
-    }
-}
-EOF
-
-# ---------------------------------------------------------
-# ~/.config/i3status/config
-# ---------------------------------------------------------
-
-cat > "$HOME/.config/i3status/config" << 'EOF'
-general {
-    colors = true
-    interval = 5
-    color_good     = "#a8d8a8"
-    color_degraded = "#f0c060"
-    color_bad      = "#f07070"
-}
-
-order += "wireless _first_"
-order += "ethernet _first_"
-order += "volume master"
-order += "battery all"
-order += "disk /"
-order += "cpu_usage"
-order += "memory"
-order += "tztime local"
-
-wireless _first_ {
-    format_up   = "󰤨  %essid %ip"
-    format_down = "󰤭  desconectado"
-}
-
-ethernet _first_ {
-    format_up   = "󰈀  %ip"
-    format_down = ""
-}
-
-volume master {
-    format        = "󰕾  %volume"
-    format_muted  = "󰗁  mudo"
-    device        = "pulse"
-    mixer         = "Master"
-    mixer_idx     = 0
-}
-
-battery all {
-    format          = "%status %percentage %remaining"
-    format_down     = "sem bateria"
-    status_chr      = "󰂄 "
-    status_bat      = "󰁹 "
-    status_unk      = "? "
-    status_full     = "󰁹 "
-    low_threshold   = 15
-    threshold_type  = percentage
-    integer_battery_capacity = true
-    last_full_capacity = true
-}
-
-disk "/" {
-    format          = "󰋊  %avail livre"
-    low_threshold   = 10
-    threshold_type  = gbytes_avail
-}
-
-cpu_usage {
-    format          = "󰍛  %usage"
-    degraded_threshold = 60
-    max_threshold   = 90
-}
-
-memory {
-    format          = "󰘙  %used / %total"
-    threshold_degraded = "2G"
-    format_degraded = "󰘙  MEM BAIXA %available"
-}
-
-tztime local {
-    format = "󰥔  %d/%m/%Y  %H:%M"
-}
-EOF
-
-# ---------------------------------------------------------
-# ~/.config/picom.conf
-# ---------------------------------------------------------
-
-cat > "$HOME/.config/picom.conf" << 'EOF'
-backend = "glx";
-vsync = true;
-
-opacity-rule = [
-    "75:class_g = 'Alacritty'",
-    "100:class_g != 'Alacritty'"
-];
-
-fading = true;
-fade-in-step = 0.05;
-fade-out-step = 0.05;
-fade-delta = 8;
-
-shadow = true;
-shadow-radius = 12;
-shadow-opacity = 0.35;
-shadow-offset-x = -8;
-shadow-offset-y = -8;
-shadow-exclude = [
-    "class_g = 'i3-frame'",
-    "class_g = 'i3bar'"
-];
-
-corner-radius = 10;
-rounded-corners-exclude = [
-    "class_g = 'i3bar'"
-];
-EOF
-
-# ---------------------------------------------------------
-# ~/.config/alacritty/alacritty.toml
-# ---------------------------------------------------------
-
-mkdir -p "$HOME/.config/alacritty"
-
-cat > "$HOME/.config/alacritty/alacritty.toml" << 'EOF'
-[window]
-opacity = 1.0
-padding = { x = 12, y = 12 }
-
-[cursor]
-style = { shape = "Beam", blinking = "On" }
-blink_interval = 500
-
-[font]
-size = 11.0
-
-[font.normal]
-family = "JetBrainsMono Nerd Font Mono"
-style = "Regular"
-
-[font.bold]
-family = "JetBrainsMono Nerd Font Mono"
-style = "Bold"
-
-[font.italic]
-family = "JetBrainsMono Nerd Font Mono"
-style = "Italic"
-
-[colors.primary]
-background = "#000000"
-foreground = "#e0e8e0"
-
-[colors.normal]
-black =   "#0d0d0d"
-red =     "#ff4444"
-green =   "#7aab7a"
-yellow =  "#c0d8c0"
-blue =    "#6ab0f5"
-magenta = "#8aaa8a"
-cyan =    "#50c8a0"
-white =   "#c0d8c0"
-
-[colors.bright]
-black =   "#333333"
-red =     "#ff6666"
-green =   "#9ac89a"
-yellow =  "#e0f0e0"
-blue =    "#8acbff"
-magenta = "#c0d8c0"
-cyan =    "#70e0b0"
-white =   "#ffffff"
-EOF
-
-# ---------------------------------------------------------
-# ~/.config/rofi/config.rasi + theme.rasi
-# ---------------------------------------------------------
-
-mkdir -p "$HOME/.config/rofi"
-
-cat > "$HOME/.config/rofi/config.rasi" << 'EOF'
-configuration {
-    modi: "drun,run";
-    show-icons: true;
-    icon-theme: "Papirus-Dark";
-    font: "JetBrainsMono Nerd Font Mono 11";
-    display-drun: "󰍉  apps";
-    display-run:  "  run";
-}
-
-@theme "~/.config/rofi/theme.rasi"
-EOF
-
-cat > "$HOME/.config/rofi/theme.rasi" << 'EOF'
-* {
-    bg:     #080808;
-    bg-alt: #0d1a0d;
-    fg:     #c0d8c0;
-    fg-dim: #3a5a3a;
-    accent: #7aab7a;
-    urgent: #cc4444;
-
-    background-color: transparent;
-    text-color:       @fg;
-    border-color:     transparent;
-    outline-color:    transparent;
-}
-
-window {
-    background-color: @bg;
-    border:           1px solid;
-    border-color:     @accent;
-    border-radius:    6px;
-    width:            480px;
-    padding:          0;
-}
-
-mainbox {
-    background-color: transparent;
-    padding:          8px;
-    spacing:          0;
-}
-
-inputbar {
-    background-color: @bg-alt;
-    border-radius:    4px;
-    padding:          8px 12px;
-    margin:           0 0 8px 0;
-    spacing:          0;
-    children:         [ prompt, entry ];
-}
-
-prompt {
-    background-color: transparent;
-    text-color:       @accent;
-    padding:          0 8px 0 0;
-}
-
-entry {
-    background-color: transparent;
-    text-color:       @fg;
-}
-
-listview {
-    background-color: transparent;
-    lines:            8;
-    columns:          1;
-    spacing:          2px;
-    scrollbar:        false;
-    padding:          0;
-}
-
-element {
-    background-color: transparent;
-    padding:          6px 12px;
-    border-radius:    4px;
-    spacing:          0;
-}
-
-element normal.normal,
-element alternate.normal {
-    background-color: transparent;
-    text-color:       @fg;
-}
-
-element selected.normal {
-    background-color: @bg-alt;
-    text-color:       @accent;
-}
-
-element normal.urgent,
-element alternate.urgent {
-    background-color: transparent;
-    text-color:       @urgent;
-}
-
-element selected.urgent {
-    background-color: @bg-alt;
-    text-color:       @urgent;
-}
-
-element-icon {
-    background-color: transparent;
-    size:             18px;
-    padding:          0 8px 0 0;
-}
-
-element-text {
-    background-color: transparent;
-    text-color:       inherit;
-}
-EOF
-
-mkdir -p "$HOME/Pictures"
-
-print_success "Configuração do i3 aplicada"
-print_warning "Defina o wallpaper em ~/.config/i3/config (exec feh --bg-scale /caminho/wallpaper.png)"
-
-# =========================================================
-# 12 — LOCK SCREEN (i3lock com blur)
-# =========================================================
-
-print_status "Configurando lock screen..."
-
-mkdir -p "$HOME/.local/bin"
-
-cat > "$HOME/.local/bin/lock.sh" << 'EOF'
-#!/bin/bash
-TMPBG=/tmp/lockscreen.png
-maim "$TMPBG"
-magick "$TMPBG" -blur 0x10 "$TMPBG"
-i3lock -i "$TMPBG" --nofork
-rm -f "$TMPBG"
-EOF
-
-chmod +x "$HOME/.local/bin/lock.sh"
-
-# garantir que ~/.local/bin está no PATH
-if ! grep -q 'HOME/.local/bin' "$HOME/.bashrc" 2>/dev/null; then
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-fi
-
-print_success "Lock screen configurado (Super+Shift+X para bloquear)"
-
-# =========================================================
-# 13 — FASTFETCH
-# =========================================================
-
-print_status "Configurando fastfetch..."
-
-mkdir -p "$HOME/.config/fastfetch"
-
-cat > "$HOME/.config/fastfetch/config.jsonc" << 'EOF'
-{
-    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
-    "logo": {
-        "type": "auto",
-        "padding": { "top": 1 },
-        "color": { "1": "bright_green", "2": "green" }
-    },
-    "display": {
-        "separator": "  ",
-        "color": { "keys": "green", "title": "green" }
-    },
-    "modules": [
-        { "type": "title",    "format": "{user-name}@{host-name}" },
-        "separator",
-        { "type": "os",       "key": "󰣇  OS      " },
-        { "type": "kernel",   "key": "  Kernel  " },
-        { "type": "wm",       "key": "  WM      " },
-        { "type": "terminal", "key": "  Term    " },
-        { "type": "shell",    "key": "  Shell   " },
-        { "type": "cpu",      "key": "󰍛  CPU     " },
-        { "type": "memory",   "key": "󰘙  RAM     " },
-        { "type": "disk",     "key": "󰋊  Disk    " },
-        { "type": "uptime",   "key": "  Uptime  " },
-        "separator",
-        "colors"
-    ]
-}
-EOF
-
-if ! grep -q 'fastfetch' "$HOME/.bashrc" 2>/dev/null; then
-    echo '' >> "$HOME/.bashrc"
-    echo 'command -v fastfetch &>/dev/null && fastfetch' >> "$HOME/.bashrc"
-fi
-
-print_success "fastfetch configurado"
-
-# =========================================================
+# ====================================
 # FINALIZAÇÃO
-# =========================================================
-
+# ====================================
 echo ""
-echo "✅ Ambiente configurado."
+echo "🎉 CONFIGURAÇÃO COMPLETA!"
 echo ""
-echo "Versões instaladas:"
+print_success "Todas as ferramentas foram instaladas com sucesso!"
 echo ""
-
-git --version || true
-node --version || true
-npm --version || true
-java --version || true
-mvn --version || true
-docker --version || true
-docker compose version || true
-flatpak --version || true
-fastfetch --version || true
-
-if command_exists zed; then
-    zed --version || true
-fi
-
+echo "📋 PRÓXIMOS PASSOS MANUAIS:"
+echo "1. 🔄 Reinicie o terminal ou execute: source ~/.zshrc"
+echo "2. 🐚 Defina ZSH como shell padrão: chsh -s \$(which zsh)"
+echo "3. 🔄 Faça logout/login para aplicar as configurações do Docker"
+echo "4. ⌨️  Configure o atalho do Diodon:"
+echo "   - Vá em: Configurações > Teclado > Atalhos > Atalhos personalizados"
+echo "   - Nome: Diodon"
+echo "   - Comando: /usr/bin/diodon"
+echo "   - Atalho: Windows + V"
 echo ""
-print_warning "Faça logout/login para aplicar o grupo docker"
+echo "🔧 VERSÕES INSTALADAS:"
+if command_exists git;    then echo "   Git:     $(git --version)"; fi
+if command_exists curl;   then echo "   Curl:    $(curl --version | head -n1)"; fi
+if command_exists docker; then echo "   Docker:  $(docker --version)"; fi
+if command_exists node;   then echo "   Node.js: $(node --version)"; fi
+if command_exists npm;    then echo "   NPM:     $(npm --version)"; fi
+echo ""
+print_success "Ambiente de desenvolvimento pronto para uso! 🚀"
