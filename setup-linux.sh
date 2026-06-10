@@ -17,7 +17,7 @@ print_success() { echo -e "${GREEN}✅ $1${NC}"; }
 print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 print_error()   { echo -e "${RED}❌ $1${NC}"; }
 
-command_exists()   { command -v "$1" >/dev/null 2>&1; }
+command_exists()    { command -v "$1" >/dev/null 2>&1; }
 package_installed() { dpkg -l | grep -q "^ii  $1 "; }
 
 echo "🚀 Iniciando configuração completa do ambiente de desenvolvimento Ubuntu..."
@@ -111,7 +111,39 @@ else
 fi
 
 # ====================================
-# 6. DIODON
+# 6. JAVA 21 LTS (Temurin)
+# ====================================
+print_status "Verificando/Instalando Java 21 LTS..."
+java_version=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | cut -d'.' -f1)
+if ! command_exists java || [[ "$java_version" != "21" ]]; then
+    sudo apt install -y wget apt-transport-https gpg
+
+    wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public \
+        | sudo gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb \
+$(lsb_release -cs) main" \
+        | sudo tee /etc/apt/sources.list.d/adoptium.list > /dev/null
+
+    sudo apt update
+    sudo apt install -y temurin-21-jdk
+    print_success "Java 21 instalado!"
+else
+    print_success "Java 21 já está instalado!"
+fi
+
+# ====================================
+# 7. MAVEN
+# ====================================
+print_status "Verificando/Instalando Maven..."
+if ! command_exists mvn; then
+    sudo apt install -y maven
+    print_success "Maven instalado!"
+else
+    print_success "Maven já está instalado!"
+fi
+
+# ====================================
+# 8. DIODON
 # ====================================
 print_status "Verificando/Instalando Diodon..."
 if ! package_installed diodon; then
@@ -145,5 +177,7 @@ if command_exists curl;   then echo "   Curl:    $(curl --version | head -n1)"; 
 if command_exists docker; then echo "   Docker:  $(docker --version)"; fi
 if command_exists node;   then echo "   Node.js: $(node --version)"; fi
 if command_exists npm;    then echo "   NPM:     $(npm --version)"; fi
+if command_exists java;   then echo "   Java:    $(java -version 2>&1 | head -n1)"; fi
+if command_exists mvn;    then echo "   Maven:   $(mvn --version | head -n1)"; fi
 echo ""
 print_success "Ambiente de desenvolvimento pronto para uso! 🚀"
