@@ -1,23 +1,18 @@
 # setup-linux
 
 [![Shell](https://img.shields.io/badge/Shell-Bash-89e051)]()
-[![Linux](https://img.shields.io/badge/Linux-Fedora%20%7C%20Ubuntu-blue)]()
+[![Linux](https://img.shields.io/badge/Linux-Ubuntu-orange)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
-Script para configuração automatizada de ambiente de desenvolvimento Linux.
+Script para configuração automatizada de ambiente de desenvolvimento no **Ubuntu**.
 
 ## Compatibilidade
 
-Distribuições suportadas atualmente:
+Distribuição suportada:
 
-- Fedora
-- Ubuntu
+- **Ubuntu** (testado em versões LTS recentes)
 
-O script detecta automaticamente a distribuição utilizando:
-
-```bash
-/etc/os-release
-```
+O script utiliza `apt` e comandos específicos do Ubuntu (`lsb_release`), portanto **não é compatível com Fedora** ou outras distribuições.
 
 ---
 
@@ -25,52 +20,43 @@ O script detecta automaticamente a distribuição utilizando:
 
 ### Dependências base
 
-- curl
-- wget
-- git
-- zsh
-- ca-certificates
+- **curl** - para downloads e APIs
+- **git** - controle de versão
 
 ### Docker
 
-Instala:
+Instala o Docker Engine completo via repositório oficial:
 
-- docker-ce
-- docker compose
-- buildx
-- containerd
+- `docker-ce` (Docker Engine)
+- `docker-ce-cli` (CLI)
+- `containerd.io` (container runtime)
+- `docker-buildx-plugin` (Buildx)
+- `docker-compose-plugin` (Docker Compose v2)
 
 Também:
+- Habilita e inicia o serviço Docker
+- Adiciona o usuário ao grupo `docker` (requer logout/login para efeito)
 
-- habilita o serviço
-- adiciona o usuário ao grupo docker
+### Node.js 24 LTS (Krypton)
 
-### Node.js
+Instala via NodeSource:
+- `node` (v24.x LTS)
+- `npm` (incluído)
 
-Instala:
+### Java 21 LTS (Eclipse Temurin)
 
-- node
-- npm
-
-### Java 21
-
-Instala OpenJDK 21.
+Instala via repositório Adoptium:
+- `temurin-21-jdk` (JDK 21 LTS)
 
 ### Maven
 
-Instala Maven para projetos Java.
-
-### Fastfetch
-
-Ferramenta de informações do sistema.
+Instala via repositório Ubuntu:
+- `maven` (build tool para projetos Java)
 
 ### Diodon
 
-Gerenciador de clipboard.
-
-### Zed
-
-Instala automaticamente o editor Zed.
+Gerenciador de área de transferência (clipboard manager):
+- `diodon` - interface GTK + indicador de painel
 
 ---
 
@@ -100,37 +86,65 @@ chmod +x setup-linux.sh
 ./setup-linux.sh
 ```
 
+> **Nota:** O script deve ser executado como usuário comum (não root), pois usa `sudo` internamente quando necessário.
+
 ---
 
 ## Configuração do Git
 
-Durante a execução serão solicitados:
+Durante a execução, serão solicitados interativamente:
 
 ```text
-Nome Git:
-Email Git:
+Digite seu nome de usuário Git:
+Digite seu email Git:
 ```
 
 As informações serão configuradas globalmente:
 
 ```bash
-git config --global user.name
-git config --global user.email
+git config --global user.name "Seu Nome"
+git config --global user.email "seu.email@exemplo.com"
+```
+
+Se deixados em branco, configure manualmente depois:
+
+```bash
+git config --global user.name 'Seu Nome'
+git config --global user.email 'seu.email@exemplo.com'
 ```
 
 ---
 
 ## Pós-instalação
 
-Após instalação do Docker:
+Após a execução completa:
+
+1. **Docker**: Faça **logout/login** (ou reinicie) para usar Docker sem `sudo`
+2. **Diodon**: Configure o atalho de teclado:
+   - Vá em: *Configurações > Teclado > Atalhos > Atalhos personalizados*
+   - Nome: `Diodon`
+   - Comando: `/usr/bin/diodon`
+   - Atalho: `Super + V` (tecla Windows + V)
+
+---
+
+## Verificação das versões
+
+Ao final, o script exibe as versões instaladas:
 
 ```text
-Faça logout/login para usar Docker sem sudo
+Git:     git version 2.x.x
+Curl:    curl 8.x.x
+Docker:  Docker version 27.x.x
+Node.js: v24.x.x
+NPM:     10.x.x
+Java:    openjdk version "21.x.x" (Eclipse Temurin)
+Maven:   Apache Maven 3.x.x
 ```
 
 ---
 
-## Estrutura
+## Estrutura do repositório
 
 ```text
 setup-linux/
@@ -143,4 +157,4 @@ setup-linux/
 
 ## Licença
 
-MIT
+MIT © [Luiz Bezerra](https://github.com/bezerraluiz)
