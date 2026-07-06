@@ -1,18 +1,18 @@
 # setup-linux
 
 [![Shell](https://img.shields.io/badge/Shell-Bash-89e051)]()
-[![Linux](https://img.shields.io/badge/Linux-Ubuntu-orange)]()
+[![Linux](https://img.shields.io/badge/Linux-Mint-87CF3E)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
-Script para configuração automatizada de ambiente de desenvolvimento no **Ubuntu**.
+Script para configuração automatizada de ambiente de desenvolvimento no **Linux Mint**.
 
 ## Compatibilidade
 
 Distribuição suportada:
 
-- **Ubuntu** (testado em versões LTS recentes)
+- **Linux Mint** (o script verifica `/etc/os-release` e recusa rodar em outra distribuição)
 
-O script utiliza `apt` e comandos específicos do Ubuntu (`lsb_release`), portanto **não é compatível com Fedora** ou outras distribuições.
+O script utiliza `apt` e resolve automaticamente o codename Ubuntu subjacente (via `UBUNTU_CODENAME` em `/etc/os-release`, com fallback para `lsb_release -cs`) para configurar os repositórios de terceiros (Docker, Adoptium), portanto **não é compatível com Fedora** ou outras distribuições não baseadas em Ubuntu/Debian.
 
 ---
 

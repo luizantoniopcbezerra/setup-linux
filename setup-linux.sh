@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script completo para configuração do ambiente de desenvolvimento Ubuntu
+# Script completo para configuração do ambiente de desenvolvimento Linux Mint
 # Autor: Guilherme Celso
 # Descrição: Automatiza a instalação de todas as ferramentas essenciais
 
@@ -20,8 +20,34 @@ print_error()   { echo -e "${RED}❌ $1${NC}"; }
 command_exists()    { command -v "$1" >/dev/null 2>&1; }
 package_installed() { dpkg -l | grep -q "^ii  $1 "; }
 
-echo "🚀 Iniciando configuração completa do ambiente de desenvolvimento Ubuntu..."
+# Retorna o codename da versão Ubuntu na qual o Linux Mint é baseado.
+# Necessário porque `lsb_release -cs` retorna o codename do Mint (ex: "vera"),
+# que não existe nos repositórios de terceiros (Docker, Adoptium), causando falha.
+get_ubuntu_base_codename() {
+    if [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        if [ -n "$UBUNTU_CODENAME" ]; then
+            echo "$UBUNTU_CODENAME"
+            return
+        fi
+    fi
+    lsb_release -cs
+}
+
+echo "🚀 Iniciando configuração completa do ambiente de desenvolvimento Linux Mint..."
 echo "⏱️  Este processo pode levar alguns minutos..."
+echo ""
+
+# ====================================
+# 0. VERIFICAÇÃO DO SISTEMA OPERACIONAL
+# ====================================
+print_status "Verificando distribuição..."
+if [ ! -r /etc/os-release ] || ! grep -qi '^ID=linuxmint' /etc/os-release; then
+    print_error "Este script foi feito exclusivamente para o Linux Mint."
+    exit 1
+fi
+print_success "Linux Mint detectado! ($(grep '^VERSION=' /etc/os-release | cut -d'"' -f2))"
 echo ""
 
 # ====================================
@@ -83,7 +109,7 @@ if ! command_exists docker; then
     sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+https://download.docker.com/linux/ubuntu $(get_ubuntu_base_codename) stable" \
         | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
     sudo apt update
@@ -121,7 +147,7 @@ if ! command_exists java || [[ "$java_version" != "21" ]]; then
     wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public \
         | sudo gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg
     echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb \
-$(lsb_release -cs) main" \
+$(get_ubuntu_base_codename) main" \
         | sudo tee /etc/apt/sources.list.d/adoptium.list > /dev/null
 
     sudo apt update
@@ -161,16 +187,7 @@ echo "🎉 CONFIGURAÇÃO COMPLETA!"
 echo ""
 print_success "Todas as ferramentas foram instaladas com sucesso!"
 echo ""
-echo "📋 PRÓXIMOS PASSOS MANUAIS:"
-echo "1. 🔄 Reinicie o terminal ou execute: source ~/.zshrc"
-echo "2. 🐚 Defina ZSH como shell padrão: chsh -s \$(which zsh)"
-echo "3. 🔄 Faça logout/login para aplicar as configurações do Docker"
-echo "4. ⌨️  Configure o atalho do Diodon:"
-echo "   - Vá em: Configurações > Teclado > Atalhos > Atalhos personalizados"
-echo "   - Nome: Diodon"
-echo "   - Comando: /usr/bin/diodon"
-echo "   - Atalho: Windows + V"
-echo ""
+echo "🔄 Faça logout/login para aplicar as configurações do Docker"
 echo "🔧 VERSÕES INSTALADAS:"
 if command_exists git;    then echo "   Git:     $(git --version)"; fi
 if command_exists curl;   then echo "   Curl:    $(curl --version | head -n1)"; fi
