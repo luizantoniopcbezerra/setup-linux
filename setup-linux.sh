@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Script completo para configuração do ambiente de desenvolvimento Fedora GNOME
-# Autor: Guilherme Celso
-# Descrição: Automatiza a instalação de ferramentas essenciais no Fedora GNOME
+# Script completo para configuração do ambiente de desenvolvimento Linux Mint
+# Autor: Guilherme Celso (adaptado)
+# Descrição: Automatiza a instalação de ferramentas essenciais no Linux Mint
 
 set -e
 
@@ -18,9 +18,9 @@ print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 print_error()   { echo -e "${RED}❌ $1${NC}"; }
 
 command_exists()    { command -v "$1" >/dev/null 2>&1; }
-package_installed() { rpm -q "$1" >/dev/null 2>&1; }
+package_installed() { dpkg -s "$1" >/dev/null 2>&1; }
 
-echo "🚀 Iniciando configuração completa do ambiente de desenvolvimento Fedora GNOME..."
+echo "🚀 Iniciando configuração completa do ambiente de desenvolvimento Linux Mint..."
 echo "⏱️  Este processo pode levar alguns minutos..."
 echo ""
 
@@ -36,59 +36,53 @@ fi
 # shellcheck disable=SC1091
 . /etc/os-release
 
-if [ "$ID" != "fedora" ]; then
-    print_error "Este script foi feito exclusivamente para Fedora."
+if [ "${ID:-}" != "linuxmint" ]; then
+    print_error "Este script foi feito exclusivamente para Linux Mint."
+    print_warning "Sistema detectado: ${PRETTY_NAME:-desconhecido}"
     exit 1
 fi
 
-if [ "${XDG_CURRENT_DESKTOP:-}" != "" ] && ! echo "$XDG_CURRENT_DESKTOP" | grep -qi "gnome"; then
-    print_error "Este script foi feito para Fedora GNOME."
-    print_warning "Desktop detectado: ${XDG_CURRENT_DESKTOP}"
-    exit 1
-fi
-
-print_success "Fedora detectado! (${PRETTY_NAME})"
+print_success "Linux Mint detectado! (${PRETTY_NAME})"
 echo ""
 
 # ====================================
 # 1. ATUALIZAÇÃO DO SISTEMA
 # ====================================
-print_status "Atualizando o sistema..."
-sudo dnf upgrade -y --refresh
+print_status "Atualizando índice de pacotes..."
+sudo apt update -y
+
+print_status "Atualizando pacotes instalados..."
+sudo apt upgrade -y
 print_success "Sistema atualizado!"
 
 # ====================================
-# 2. CURL
+# 2. DEPENDÊNCIAS BÁSICAS
 # ====================================
-print_status "Verificando/Instalando CURL..."
-if ! command_exists curl; then
-    sudo dnf install -y curl
-    print_success "CURL instalado!"
-else
-    print_success "CURL já está instalado!"
-fi
+print_status "Instalando dependências básicas..."
+sudo apt install -y ca-certificates curl gnupg lsb-release software-properties-common
+print_success "Dependências básicas instaladas!"
 
 # ====================================
 # 3. GIT
 # ====================================
-print_status "Verificando/Instalando GIT..."
+print_status "Verificando/Instalando Git..."
 if ! command_exists git; then
-    sudo dnf install -y git
-    print_success "GIT instalado!"
+    sudo apt install -y git
+    print_success "Git instalado!"
 else
-    print_success "GIT já está instalado!"
+    print_success "Git já está instalado!"
 fi
 
-print_status "Configurando GIT..."
+print_status "Configurando Git..."
 echo ""
 echo "🔧 Configuração do Git:"
-read -p "Digite seu nome de usuário Git: " git_username
-read -p "Digite seu email Git: " git_email
+read -r -p "Digite seu nome de usuário Git: " git_username
+read -r -p "Digite seu email Git: " git_email
 
 if [ -n "$git_username" ] && [ -n "$git_email" ]; then
     git config --global user.name "$git_username"
     git config --global user.email "$git_email"
-    print_success "GIT configurado com usuário: $git_username ($git_email)"
+    print_success "Git configurado com usuário: $git_username ($git_email)"
 else
     print_warning "Nome ou email não informados. Configure manualmente depois com:"
     echo "  git config --global user.name 'Seu Nome'"
@@ -97,13 +91,33 @@ fi
 echo ""
 
 # ====================================
-# 4. DOCKER
+# 4. DOCKER (repositório oficial)
 # ====================================
 print_status "Verificando/Instalando Docker..."
 if ! command_exists docker; then
-    sudo dnf -y install dnf-plugins-core
-    sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
-    sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    # Remove versões antigas, se houver
+    sudo apt remove -y docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc || true
+
+    # Adiciona chave e repositório oficial Docker (Ubuntu base, compatível com Mint)
+    sudo install -m 0755 -d /etc/apt/keyrings
+    if [ ! -f /etc/apt/keyrings/docker.asc ]; then
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.asc
+        sudo chmod a+r /etc/apt/keyrings/docker.asc
+    fi
+
+    UBUNTU_CODENAME="${UBUNTU_CODENAME:-}"
+    if [ -z "$UBUNTU_CODENAME" ]; then
+        print_error "Não foi possível detectar UBUNTU_CODENAME no Linux Mint."
+        print_warning "Defina manualmente no /etc/os-release ou ajuste o script."
+        exit 1
+    fi
+
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+      ${UBUNTU_CODENAME} stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    sudo apt update -y
+    sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
     sudo systemctl enable --now docker
     sudo usermod -aG docker "$USER"
@@ -114,17 +128,18 @@ else
 fi
 
 # ====================================
-# 5. NODE.JS 24 LTS
+# 5. NODE.JS LTS (NodeSource 24.x)
 # ====================================
 print_status "Verificando/Instalando Node.js 24..."
 if ! command_exists node || [[ "$(node --version)" != v24* ]]; then
-    # Fedora geralmente possui módulos Node via dnf
-    sudo dnf install -y nodejs npm
+    curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+    sudo apt install -y nodejs
     print_success "Node.js instalado!"
+
     if command_exists node; then
         if [[ "$(node --version)" != v24* ]]; then
             print_warning "Versão instalada não é 24.x ($(node --version))."
-            print_warning "Se precisar EXATAMENTE 24.x, use nvm ou NodeSource para Fedora."
+            print_warning "Verifique compatibilidade do repositório NodeSource com sua versão do Mint."
         fi
     fi
 else
@@ -132,19 +147,16 @@ else
 fi
 
 # ====================================
-# 6. DIODON (alternativa no GNOME: GPaste)
+# 6. GERENCIADOR DE ÁREA DE TRANSFERÊNCIA
+# (Linux Mint/Cinnamon: clipit/parcellite/copyq)
 # ====================================
 print_status "Verificando ferramenta de clipboard..."
-if package_installed diodon; then
-    print_success "Diodon já está instalado!"
+if package_installed copyq; then
+    print_success "CopyQ já está instalado!"
 else
-    if package_installed gpaste; then
-        print_success "GPaste já está instalado!"
-    else
-        print_warning "Diodon não é padrão no Fedora GNOME. Instalando GPaste..."
-        sudo dnf install -y gpaste
-        print_success "GPaste instalado!"
-    fi
+    print_warning "Instalando CopyQ..."
+    sudo apt install -y copyq
+    print_success "CopyQ instalado!"
 fi
 
 # ====================================
