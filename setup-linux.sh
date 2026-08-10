@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Script completo para configuração do ambiente de desenvolvimento Linux Mint
+# Script completo para configuração do ambiente de desenvolvimento Fedora GNOME
 # Autor: Guilherme Celso
-# Descrição: Automatiza a instalação de todas as ferramentas essenciais
+# Descrição: Automatiza a instalação de ferramentas essenciais no Fedora GNOME
 
 set -e
 
@@ -18,24 +18,9 @@ print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 print_error()   { echo -e "${RED}❌ $1${NC}"; }
 
 command_exists()    { command -v "$1" >/dev/null 2>&1; }
-package_installed() { dpkg -l | grep -q "^ii  $1 "; }
+package_installed() { rpm -q "$1" >/dev/null 2>&1; }
 
-# Retorna o codename da versão Ubuntu na qual o Linux Mint é baseado.
-# Necessário porque `lsb_release -cs` retorna o codename do Mint (ex: "vera"),
-# que não existe nos repositórios de terceiros (Docker), causando falha.
-get_ubuntu_base_codename() {
-    if [ -r /etc/os-release ]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        if [ -n "$UBUNTU_CODENAME" ]; then
-            echo "$UBUNTU_CODENAME"
-            return
-        fi
-    fi
-    lsb_release -cs
-}
-
-echo "🚀 Iniciando configuração completa do ambiente de desenvolvimento Linux Mint..."
+echo "🚀 Iniciando configuração completa do ambiente de desenvolvimento Fedora GNOME..."
 echo "⏱️  Este processo pode levar alguns minutos..."
 echo ""
 
@@ -43,18 +28,33 @@ echo ""
 # 0. VERIFICAÇÃO DO SISTEMA OPERACIONAL
 # ====================================
 print_status "Verificando distribuição..."
-if [ ! -r /etc/os-release ] || ! grep -qi '^ID=linuxmint' /etc/os-release; then
-    print_error "Este script foi feito exclusivamente para o Linux Mint."
+if [ ! -r /etc/os-release ]; then
+    print_error "Não foi possível identificar o sistema operacional."
     exit 1
 fi
-print_success "Linux Mint detectado! ($(grep '^VERSION=' /etc/os-release | cut -d'"' -f2))"
+
+# shellcheck disable=SC1091
+. /etc/os-release
+
+if [ "$ID" != "fedora" ]; then
+    print_error "Este script foi feito exclusivamente para Fedora."
+    exit 1
+fi
+
+if [ "${XDG_CURRENT_DESKTOP:-}" != "" ] && ! echo "$XDG_CURRENT_DESKTOP" | grep -qi "gnome"; then
+    print_error "Este script foi feito para Fedora GNOME."
+    print_warning "Desktop detectado: ${XDG_CURRENT_DESKTOP}"
+    exit 1
+fi
+
+print_success "Fedora detectado! (${PRETTY_NAME})"
 echo ""
 
 # ====================================
 # 1. ATUALIZAÇÃO DO SISTEMA
 # ====================================
 print_status "Atualizando o sistema..."
-sudo apt update && sudo apt upgrade -y
+sudo dnf upgrade -y --refresh
 print_success "Sistema atualizado!"
 
 # ====================================
@@ -62,7 +62,7 @@ print_success "Sistema atualizado!"
 # ====================================
 print_status "Verificando/Instalando CURL..."
 if ! command_exists curl; then
-    sudo apt install -y curl
+    sudo dnf install -y curl
     print_success "CURL instalado!"
 else
     print_success "CURL já está instalado!"
@@ -73,7 +73,7 @@ fi
 # ====================================
 print_status "Verificando/Instalando GIT..."
 if ! command_exists git; then
-    sudo apt install -y git
+    sudo dnf install -y git
     print_success "GIT instalado!"
 else
     print_success "GIT já está instalado!"
@@ -101,23 +101,12 @@ echo ""
 # ====================================
 print_status "Verificando/Instalando Docker..."
 if ! command_exists docker; then
-    sudo apt install -y apt-transport-https ca-certificates curl gnupg lsb-release
+    sudo dnf -y install dnf-plugins-core
+    sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+    sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-    sudo install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-        | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-https://download.docker.com/linux/ubuntu $(get_ubuntu_base_codename) stable" \
-        | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-    sudo apt update
-    sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-    sudo systemctl start docker && sudo systemctl enable docker
+    sudo systemctl enable --now docker
     sudo usermod -aG docker "$USER"
-    # Nota: chmod 666 no socket é inseguro; o grupo docker é suficiente após relogin
 
     print_success "Docker instalado!"
 else
@@ -125,27 +114,37 @@ else
 fi
 
 # ====================================
-# 5. NODE.JS 24 LTS (Krypton)
+# 5. NODE.JS 24 LTS
 # ====================================
-print_status "Verificando/Instalando Node.js 24 LTS..."
+print_status "Verificando/Instalando Node.js 24..."
 if ! command_exists node || [[ "$(node --version)" != v24* ]]; then
-    curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-    sudo apt-get install -y nodejs
-    print_success "Node.js 24 LTS instalado!"
+    # Fedora geralmente possui módulos Node via dnf
+    sudo dnf install -y nodejs npm
+    print_success "Node.js instalado!"
+    if command_exists node; then
+        if [[ "$(node --version)" != v24* ]]; then
+            print_warning "Versão instalada não é 24.x ($(node --version))."
+            print_warning "Se precisar EXATAMENTE 24.x, use nvm ou NodeSource para Fedora."
+        fi
+    fi
 else
-    print_success "Node.js 24 LTS já está instalado!"
+    print_success "Node.js 24 já está instalado!"
 fi
 
-
 # ====================================
-# 6. DIODON
+# 6. DIODON (alternativa no GNOME: GPaste)
 # ====================================
-print_status "Verificando/Instalando Diodon..."
-if ! package_installed diodon; then
-    sudo apt install -y diodon
-    print_success "Diodon instalado!"
-else
+print_status "Verificando ferramenta de clipboard..."
+if package_installed diodon; then
     print_success "Diodon já está instalado!"
+else
+    if package_installed gpaste; then
+        print_success "GPaste já está instalado!"
+    else
+        print_warning "Diodon não é padrão no Fedora GNOME. Instalando GPaste..."
+        sudo dnf install -y gpaste
+        print_success "GPaste instalado!"
+    fi
 fi
 
 # ====================================
@@ -156,7 +155,7 @@ echo "🎉 CONFIGURAÇÃO COMPLETA!"
 echo ""
 print_success "Todas as ferramentas foram instaladas com sucesso!"
 echo ""
-echo "🔄 Faça logout/login para aplicar as configurações do Docker"
+echo "🔄 Faça logout/login para aplicar as configurações do Docker (grupo docker)"
 echo "🔧 VERSÕES INSTALADAS:"
 if command_exists git;    then echo "   Git:     $(git --version)"; fi
 if command_exists curl;   then echo "   Curl:    $(curl --version | head -n1)"; fi
