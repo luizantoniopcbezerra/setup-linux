@@ -24,12 +24,27 @@ O script utiliza `apt` e resolve o codename do Ubuntu diretamente de `VERSION_CO
 
 - **ca-certificates**, **gnupg**, **lsb-release**, **software-properties-common** - suporte aos repositórios
 - **curl** - para downloads e APIs
+- **openssh-client** - cliente SSH (chaves para o GitHub)
 - Habilita o repositório `universe`
 
 ### Git
 
 - **git** - controle de versão
-- Configuração interativa de `user.name` e `user.email`
+- A identidade global (`user.name`/`user.email`) **não é cadastrada pelo script**: a autenticação é feita por chaves SSH e o autor dos commits pode ser configurado depois, se ainda não existir
+
+### Chaves SSH (GitHub)
+
+O script pergunta **quantas contas** você quer configurar e pede o **email de cada uma**:
+
+- **1 conta** → 1 email → chave em `~/.ssh/id_ed25519`
+- **2 contas** → 2 emails → chaves em `~/.ssh/id_ed25519_<apelido>` (apelido derivado do email)
+
+Para cada conta ele:
+
+- Gera a chave **ed25519** (mantém as que já existem)
+- Escreve um bloco gerenciado em `~/.ssh/config` (`IdentitiesOnly yes` + `AddKeysToAgent yes`)
+- Com 2 contas, cria os aliases `github-<apelido1>` e `github-<apelido2>` (o `github.com` padrão usa a primeira chave)
+- Testa a autenticação com `ssh -T` e imprime a chave pública para você colar no GitHub
 
 ### Docker
 
@@ -76,6 +91,7 @@ Cada programa da lista registra a própria validação (função que prova que e
 
 ✅ curl                           INSTALADO
 ✅ Git                            INSTALADO
+✅ Chaves SSH (GitHub)            INSTALADO
 ✅ Docker Engine + Compose        INSTALADO
 ✅ Node.js 24 LTS                INSTALADO
 ✅ npm                            INSTALADO
@@ -84,7 +100,7 @@ Cada programa da lista registra a própria validação (função que prova que e
 ✅ Zsh como shell padrão          INSTALADO
 ✅ Diodon (clipboard)             INSTALADO
 
-✅ Validação concluída: todos os 9 itens estão instalados!
+✅ Validação concluída: todos os 10 itens estão instalados!
 ```
 
 - **Todos OK**: o script termina com código `0`
@@ -96,6 +112,7 @@ O que é validado:
 | --- | --- |
 | curl | comando `curl` disponível |
 | Git | comando `git` disponível |
+| Chaves SSH (GitHub) | arquivo(s) da(s) chave(s) + `.pub` existem e `~/.ssh/config` tem o bloco gerenciado |
 | Docker | comando `docker` + `docker compose version` |
 | Node.js 24 LTS | `node` presente e versão `v24.x` |
 | npm | comando `npm` disponível |
@@ -136,23 +153,64 @@ chmod +x setup-linux.sh
 
 ---
 
-## Configuração do Git
+## Chaves SSH
 
-Durante a execução, serão solicitados interativamente:
+Durante a execução, o script faz apenas estas perguntas (não cadastra identidade global):
 
 ```text
-Digite seu nome de usuário Git:
-Digite seu email Git:
+Quantas contas SSH/GitHub você quer configurar? (1 ou 2):
+Email da conta 1 de 2 (comentário da chave):
+Email da conta 2 de 2 (comentário da chave):
 ```
 
-As informações serão configuradas globalmente:
+O que acontece em seguida:
 
 ```bash
-git config --global user.name "Seu Nome"
-git config --global user.email "seu.email@exemplo.com"
+# 1 conta
+~/.ssh/id_ed25519          # chave privada
+~/.ssh/id_ed25519.pub      # chave pública (colar no GitHub)
+
+# 2 contas (ex: alice@exemplo.com e bob@trabalho.com)
+~/.ssh/id_ed25519_alice
+~/.ssh/id_ed25519_bob
 ```
 
-Se deixados em branco, configure manualmente depois:
+`~/.ssh/config` recebe um bloco gerenciado (removido e reescrito a cada execução, sem sobrescrever o resto do seu arquivo):
+
+```sshconfig
+# >>> setup-linux: chaves SSH GitHub >>>
+Host github.com github
+    HostName github.com
+    User git
+    IdentityFile /home/voce/.ssh/id_ed25519_alice
+    IdentitiesOnly yes
+    AddKeysToAgent yes
+
+Host github-alice
+    HostName github.com
+    User git
+    IdentityFile /home/voce/.ssh/id_ed25519_alice
+    IdentitiesOnly yes
+    AddKeysToAgent yes
+
+Host github-bob
+    ...
+# <<< setup-linux: chaves SSH GitHub <<<
+```
+
+Para usar a **segunda conta** em um repositório:
+
+```bash
+git remote set-url origin git@github-bob:usuario/repo.git
+```
+
+O script ainda imprime a(s) chave(s) pública(s) para colar em
+**GitHub > Settings > SSH and GPG keys** e testa com `ssh -T`.
+
+### Identidade dos commits (opcional)
+
+A chave SSH autentica o push/pull, mas o autor do commit continua sendo
+`user.name` + `user.email`. Se ainda não existir, o script avisa no final e você configura quando quiser:
 
 ```bash
 git config --global user.name 'Seu Nome'
@@ -165,9 +223,11 @@ git config --global user.email 'seu.email@exemplo.com'
 
 Após a execução completa:
 
-1. **Shell**: Faça **logout/login** para entrar no novo shell principal (**zsh + Oh My Zsh**)
-2. **Docker**: Faça **logout/login** (ou reinicie) para usar Docker sem `sudo`
-3. **Diodon**: Configure o atalho de teclado (Ubuntu/GNOME):
+1. **Chaves SSH**: adicione a(s) chave(s) pública(s) no GitHub
+   (*Settings > SSH and GPG keys > New SSH key*) e valide com `ssh -T git@github.com`
+2. **Shell**: Faça **logout/login** para entrar no novo shell principal (**zsh + Oh My Zsh**)
+3. **Docker**: Faça **logout/login** (ou reinicie) para usar Docker sem `sudo`
+4. **Diodon**: Configure o atalho de teclado (Ubuntu/GNOME):
    - Vá em: *Configurações > Teclado > Atalhos > Atalhos personalizados*
    - Nome: `Diodon`
    - Comando: `/usr/bin/diodon`
@@ -189,6 +249,7 @@ Zsh:        zsh 5.x.x
 Oh My Zsh:  master
 Diodon:     1.13.0
 Shell:      /usr/bin/zsh
+SSH key:    /home/voce/.ssh/id_ed25519
 ```
 
 ---

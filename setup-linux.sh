@@ -182,7 +182,7 @@ print_success "Sistema atualizado!"
 # 2. DEPENDÊNCIAS BÁSICAS
 # ====================================
 print_status "Verificando/Instalando dependências básicas..."
-sudo apt install -y ca-certificates curl gnupg lsb-release software-properties-common
+sudo apt install -y ca-certificates curl gnupg lsb-release software-properties-common openssh-client
 sudo add-apt-repository -y universe
 register_validation "curl" check_curl
 print_success "Dependências básicas instaladas!"
@@ -199,25 +199,194 @@ else
     print_success "Git já está instalado!"
 fi
 
-print_status "Configurando Git..."
-echo ""
-echo "🔧 Configuração do Git:"
-read -r -p "Digite seu nome de usuário Git: " git_username
-read -r -p "Digite seu email Git: " git_email
+# ====================================
+# 4. CHAVES SSH (GitHub)
+# Não cadastra identidade global: apenas chaves SSH para autenticação.
+# O usuário informa quantas contas vai usar (1 ou 2) e o email de cada uma.
+# ====================================
+SSH_KEY_PATHS=()
+SSH_LABELS=()
 
-if [ -n "$git_username" ] && [ -n "$git_email" ]; then
-    git config --global user.name "$git_username"
-    git config --global user.email "$git_email"
-    print_success "Git configurado com usuário: $git_username ($git_email)"
-else
-    print_warning "Nome ou email não informados. Configure manualmente depois com:"
-    echo "  git config --global user.name 'Seu Nome'"
-    echo "  git config --global user.email 'seu.email@exemplo.com'"
+check_ssh_keys() {
+    local key
+    [ "${#SSH_KEY_PATHS[@]}" -gt 0 ] || return 1
+    for key in "${SSH_KEY_PATHS[@]}"; do
+        [ -f "$key" ] && [ -f "$key.pub" ] || return 1
+    done
+    [ -f "$HOME/.ssh/config" ] && grep -q '# >>> setup-linux' "$HOME/.ssh/config"
+}
+
+# Em execução sem terminal não há prompts, mas uma configuração anterior
+# continua sendo validada.
+discover_ssh_keys() {
+    local candidate
+    for candidate in "$HOME"/.ssh/id_ed25519*; do
+        [ -f "$candidate" ] || continue
+        case "$candidate" in
+            *.pub) continue ;;
+        esac
+        SSH_KEY_PATHS+=("$candidate")
+    done
+}
+
+# Testa a autenticação com o GitHub (o ssh -T sai com código 1 mesmo em
+# sucesso, por isso o texto da resposta é que decide).
+test_github_ssh() {
+    local host="$1" output
+    output="$(ssh -T -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "$host" 2>&1 || true)"
+    if printf '%s' "$output" | grep -qi "successfully authenticated"; then
+        printf '%s' "$output"
+        return 0
+    fi
+    return 1
+}
+
+print_status "Configurando chaves SSH..."
+
+if ! command_exists ssh-keygen; then
+    sudo apt install -y openssh-client
+    hash -r
 fi
-echo ""
+
+if [ ! -t 0 ]; then
+    print_warning "Execução não interativa detectada: seção de chaves SSH pulada."
+    print_warning "Execute o script em um terminal para gerar e configurar as chaves."
+    discover_ssh_keys
+    if [ "${#SSH_KEY_PATHS[@]}" -gt 0 ]; then
+        register_validation "Chaves SSH (GitHub)" check_ssh_keys
+    fi
+else
+    # Quantas contas (chaves) criar: 1 ou 2
+    ssh_accounts=""
+    while [ "$ssh_accounts" != "1" ] && [ "$ssh_accounts" != "2" ]; do
+        if ! read -r -p "Quantas contas SSH/GitHub você quer configurar? (1 ou 2): " ssh_accounts; then
+            echo ""
+            print_error "Entrada cancelada pelo usuário."
+            exit 1
+        fi
+        ssh_accounts="${ssh_accounts// /}"
+        if [ "$ssh_accounts" != "1" ] && [ "$ssh_accounts" != "2" ]; then
+            print_warning "Opção inválida. Digite 1 ou 2."
+        fi
+    done
+
+    # Um email por conta (1 conta = 1 email, 2 contas = 2 emails)
+    ssh_emails=()
+    for ((i = 1; i <= ssh_accounts; i++)); do
+        ssh_email=""
+        while [ -z "$ssh_email" ] || [[ "$ssh_email" != *@* ]]; do
+            if ! read -r -p "Email da conta ${i} de ${ssh_accounts} (comentário da chave): " ssh_email; then
+                echo ""
+                print_error "Entrada cancelada pelo usuário."
+                exit 1
+            fi
+            if [ -z "$ssh_email" ] || [[ "$ssh_email" != *@* ]]; then
+                print_warning "Informe um email válido (ex: seu.email@exemplo.com)."
+            fi
+        done
+        ssh_emails+=("$ssh_email")
+    done
+
+    # Rótulo derivado do email (sem prompt extra), sem colisão entre contas
+    for ((i = 0; i < ssh_accounts; i++)); do
+        label="$(printf '%s' "${ssh_emails[$i]%@*}" | sed 's/[^A-Za-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//')"
+        [ -n "$label" ] || label="conta$((i + 1))"
+        while printf '%s\n' "${SSH_LABELS[@]}" | grep -qxF "$label"; do
+            label="${label}-$((i + 1))"
+        done
+        SSH_LABELS+=("$label")
+    done
+
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+
+    # Gera cada chave (mantém as que já existem)
+    for ((i = 0; i < ssh_accounts; i++)); do
+        if [ "$ssh_accounts" -eq 1 ]; then
+            key_path="$HOME/.ssh/id_ed25519"
+        else
+            key_path="$HOME/.ssh/id_ed25519_${SSH_LABELS[$i]}"
+        fi
+
+        if [ -f "$key_path" ]; then
+            print_success "Chave já existe: $key_path"
+        else
+            ssh-keygen -t ed25519 -C "${ssh_emails[$i]}" -f "$key_path" -N "" -q
+            if [ ! -f "$key_path" ] || [ ! -f "$key_path.pub" ]; then
+                print_error "Não foi possível gerar a chave $key_path."
+                exit 1
+            fi
+            print_success "Chave gerada: $key_path (email ${ssh_emails[$i]})"
+        fi
+
+        chmod 600 "$key_path"
+        chmod 644 "$key_path.pub"
+        SSH_KEY_PATHS+=("$key_path")
+    done
+
+    # Bloco de ~/.ssh/config (removido e reescrito a cada execução)
+    ssh_config="$HOME/.ssh/config"
+    ssh_block="# >>> setup-linux: chaves SSH GitHub >>>"
+    ssh_block+=$'\n'"Host github.com github"
+    ssh_block+=$'\n'"    HostName github.com"
+    ssh_block+=$'\n'"    User git"
+    ssh_block+=$'\n'"    IdentityFile ${SSH_KEY_PATHS[0]}"
+    ssh_block+=$'\n'"    IdentitiesOnly yes"
+    ssh_block+=$'\n'"    AddKeysToAgent yes"
+
+    if [ "$ssh_accounts" -eq 2 ]; then
+        for ((i = 0; i < ssh_accounts; i++)); do
+            ssh_block+=$'\n'""
+            ssh_block+=$'\n'"Host github-${SSH_LABELS[$i]}"
+            ssh_block+=$'\n'"    HostName github.com"
+            ssh_block+=$'\n'"    User git"
+            ssh_block+=$'\n'"    IdentityFile ${SSH_KEY_PATHS[$i]}"
+            ssh_block+=$'\n'"    IdentitiesOnly yes"
+            ssh_block+=$'\n'"    AddKeysToAgent yes"
+        done
+    fi
+    ssh_block+=$'\n'"# <<< setup-linux: chaves SSH GitHub <<<"
+
+    if [ -f "$ssh_config" ]; then
+        awk -v s="# >>> setup-linux" -v e="# <<< setup-linux" \
+            'index($0, s) == 1 { skip = 1; next } index($0, e) == 1 { skip = 0; next } !skip { print }' \
+            "$ssh_config" > "$ssh_config.tmp"
+        mv "$ssh_config.tmp" "$ssh_config"
+    fi
+    printf '%s\n' "$ssh_block" >> "$ssh_config"
+    chmod 600 "$ssh_config"
+    print_success "Configuração SSH escrita em $ssh_config"
+
+    register_validation "Chaves SSH (GitHub)" check_ssh_keys
+
+    # Testa a autenticação de cada conta
+    print_status "Testando conexão SSH com o GitHub..."
+    for ((i = 0; i < ssh_accounts; i++)); do
+        if [ "$ssh_accounts" -eq 1 ]; then
+            ssh_host="git@github.com"
+        else
+            ssh_host="git@github-${SSH_LABELS[$i]}"
+        fi
+
+        if ssh_output="$(test_github_ssh "$ssh_host")"; then
+            print_success "$ssh_host autentica: $ssh_output"
+        else
+            print_warning "$ssh_host ainda não autentica."
+            print_warning "Adicione a chave pública abaixo no GitHub (Settings > SSH and GPG keys) e teste com: ssh -T $ssh_host"
+        fi
+    done
+
+    echo ""
+    print_status "Chaves públicas para adicionar no GitHub:"
+    for key_path in "${SSH_KEY_PATHS[@]}"; do
+        echo "   ${key_path}.pub"
+        echo "   $(cat "$key_path.pub")"
+        echo ""
+    done
+fi
 
 # ====================================
-# 4. DOCKER (repositório oficial)
+# 5. DOCKER (repositório oficial)
 # ====================================
 register_validation "Docker Engine + Compose" check_docker
 print_status "Verificando/Instalando Docker Engine e Docker Compose..."
@@ -271,7 +440,7 @@ sudo docker info >/dev/null
 print_success "Serviço Docker ativo e usuário adicionado ao grupo docker!"
 
 # ====================================
-# 5. NODE.JS LTS (NodeSource 24.x)
+# 6. NODE.JS LTS (NodeSource 24.x)
 # ====================================
 register_validation "Node.js 24 LTS" check_node
 register_validation "npm" check_npm
@@ -300,7 +469,7 @@ else
 fi
 
 # ====================================
-# 6. ZSH + OH MY ZSH (shell principal)
+# 7. ZSH + OH MY ZSH (shell principal)
 # ====================================
 register_validation "Zsh" check_zsh
 register_validation "Oh My Zsh" check_omz
@@ -360,7 +529,7 @@ else
 fi
 
 # ====================================
-# 7. GERENCIADOR DE ÁREA DE TRANSFERÊNCIA
+# 8. GERENCIADOR DE ÁREA DE TRANSFERÊNCIA
 # ====================================
 register_validation "Diodon (clipboard)" check_diodon
 print_status "Verificando ferramenta de clipboard..."
@@ -373,7 +542,7 @@ else
 fi
 
 # ====================================
-# 8. VALIDAÇÃO FINAL (item a item)
+# 9. VALIDAÇÃO FINAL (item a item)
 # ====================================
 run_validations
 
@@ -397,5 +566,19 @@ if command_exists zsh;    then echo "   Zsh:        $(zsh --version)"; fi
 if check_omz;             then echo "   Oh My Zsh:  $(git -C "$HOME/.oh-my-zsh" describe --tags 2>/dev/null || echo 'instalado')"; fi
 if package_installed diodon; then echo "   Diodon:     $(diodon --version 2>/dev/null || echo instalado)"; fi
 echo "   Shell:      $(getent passwd "$(id -un)" | cut -d: -f7)"
+if [ "${#SSH_KEY_PATHS[@]}" -gt 0 ]; then
+    for key_path in "${SSH_KEY_PATHS[@]}"; do
+        echo "   SSH key:    $key_path"
+    done
+fi
 echo ""
+
+# A identidade dos commits (user.name/user.email) não é cadastrada por este
+# script; ela só é avisada aqui se ainda não existir.
+if ! git config --global user.name >/dev/null 2>&1 || ! git config --global user.email >/dev/null 2>&1; then
+    print_warning "Identidade do Git não configurada (usada no autor dos commits). Configure quando quiser com:"
+    echo "  git config --global user.name 'Seu Nome'"
+    echo "  git config --global user.email 'seu.email@exemplo.com'"
+    echo ""
+fi
 print_success "Ambiente de desenvolvimento pronto para uso! 🚀"
