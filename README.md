@@ -34,26 +34,26 @@ O script utiliza `apt` e resolve o codename do Ubuntu diretamente de `VERSION_CO
 
 ### Chaves SSH (GitHub)
 
-O script pergunta **quantas contas** você quer configurar e, para cada chave, o **nome** e o **email**:
-
-- **1 conta** → 1 nome + 1 email
-- **2 contas** → 2 nomes + 2 emails
-
-O nome define o arquivo e o alias; o email vira o comentário da chave:
+O script pergunta **quantas chaves** você quer configurar (**sem limite**; `0` = nenhuma) e, **sempre que novas chaves serão criadas**, pergunta se deve **apagar as existentes**:
 
 ```text
-Quantas contas SSH/GitHub você quer configurar? (1 ou 2): 2
+Quantas chaves SSH você quer configurar? (0 = nenhuma): 2
+Chaves SSH existentes detectadas:
+   /home/voce/.ssh/id_ed25519_antiga
+Apagar as chaves existentes antes de criar as novas? (s/N): s
 Nome da chave 1 de 2 (ex: pessoal, trabalho): pessoal
 Email da chave 1 de 2 (comentário): alice@exemplo.com
 Nome da chave 2 de 2 (ex: pessoal, trabalho): trabalho
 Email da chave 2 de 2 (comentário): bob@trabalho.com
 ```
 
-- Gera `~/.ssh/id_ed25519_<nome>` em ed25519 (mantém as chaves já existentes)
+- O **nome** define o arquivo (`~/.ssh/id_ed25519_<nome>`) e o alias no `~/.ssh/config` (ex: `github-pessoal`, `github-trabalho`)
+- O **email** vira o comentário da chave (`ssh-keygen -C`)
+- **Apagar as existentes** = sim: remove as chaves (padrões `id_ed25519*`, `id_rsa*`, `id_ecdsa*`, `id_dsa*` — privada e `.pub`, removendo também do ssh-agent) e cria as novas do zero; **não**: mantém e reusa chaves do mesmo nome
 - Nome inválido ou repetido faz o prompt se repetir (só aceita letras, números, `-` e `_`)
 - Escreve um bloco gerenciado em `~/.ssh/config` (`IdentitiesOnly yes` + `AddKeysToAgent yes`)
 - `github.com` usa a primeira chave; cada chave ganha um alias `github-<nome>`
-- Testa a autenticação com `ssh -T` e imprime a chave pública para você colar no GitHub
+- Testa a autenticação com `ssh -T` e imprime a chave pública para colar no GitHub
 
 ### Docker
 
@@ -167,14 +167,19 @@ chmod +x setup-linux.sh
 Durante a execução, o script faz apenas estas perguntas (não cadastra identidade global):
 
 ```text
-Quantas contas SSH/GitHub você quer configurar? (1 ou 2):
-Nome da chave 1 de 2 (ex: pessoal, trabalho):
-Email da chave 1 de 2 (comentário):
-Nome da chave 2 de 2 (ex: pessoal, trabalho):
-Email da chave 2 de 2 (comentário):
+Quantas chaves SSH você quer configurar? (0 = nenhuma): 2
+Chaves SSH existentes detectadas:
+   /home/voce/.ssh/id_ed25519_antiga
+Apagar as chaves existentes antes de criar as novas? (s/N): s
+Nome da chave 1 de 2 (ex: pessoal, trabalho): pessoal
+Email da chave 1 de 2 (comentário): alice@exemplo.com
+Nome da chave 2 de 2 (ex: pessoal, trabalho): trabalho
+Email da chave 2 de 2 (comentário): bob@trabalho.com
 ```
 
-- **Nome** → vira o nome do arquivo e o alias no `~/.ssh/config` (só letras, números, `-` e `_`; repetido ou inválido, o prompt se repete)
+- **Número de chaves** → sem limite (qualquer inteiro ≥ 0); `0` não cria nada e ainda remove o bloco gerenciado do `~/.ssh/config`
+- **Apagar as existentes** → perguntado **sempre** que novas chaves serão criadas e já existirem chaves; `s` remove `id_ed25519*`, `id_rsa*`, `id_ecdsa*` e `id_dsa*` (privada + `.pub`, e do ssh-agent)
+- **Nome** → vira o nome do arquivo (`id_ed25519_<nome>`) e o alias no `~/.ssh/config` (só letras, números, `-` e `_`; repetido ou inválido, o prompt se repete)
 - **Email** → vira o comentário da chave (`ssh-keygen -C`)
 
 O que acontece em seguida:

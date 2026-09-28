@@ -202,8 +202,9 @@ fi
 # ====================================
 # 4. CHAVES SSH (GitHub)
 # Não cadastra identidade global: apenas chaves SSH para autenticação.
-# O usuário informa quantas contas vai usar (1 ou 2) e, para cada chave,
-# o nome (arquivo/alias) e o email (comentário).
+# O usuário escolhe quantas chaves quer criar (sem limite; 0 = nenhuma) e,
+# antes de criar novas, é sempre perguntado se as existentes devem ser
+# apagadas. Para cada chave: nome (arquivo/alias) e email (comentário).
 # ====================================
 SSH_KEY_PATHS=()
 SSH_LABELS=()
@@ -217,17 +218,39 @@ check_ssh_keys() {
     [ -f "$HOME/.ssh/config" ] && grep -q '# >>> setup-linux' "$HOME/.ssh/config"
 }
 
+# Lista as chaves privadas existentes em ~/.ssh (padrões comuns: ed25519,
+# rsa, ecdsa e dsa, sempre ignorando os arquivos .pub).
+list_ssh_keys() {
+    local candidate pattern
+    for pattern in "$HOME"/.ssh/id_ed25519* "$HOME"/.ssh/id_rsa* \
+                   "$HOME"/.ssh/id_ecdsa* "$HOME"/.ssh/id_dsa*; do
+        [ -f "$pattern" ] || continue
+        case "$pattern" in
+            *.pub) continue ;;
+        esac
+        printf '%s\n' "$pattern"
+    done
+}
+
 # Em execução sem terminal não há prompts, mas uma configuração anterior
 # continua sendo validada.
 discover_ssh_keys() {
-    local candidate
-    for candidate in "$HOME"/.ssh/id_ed25519*; do
-        [ -f "$candidate" ] || continue
-        case "$candidate" in
-            *.pub) continue ;;
-        esac
-        SSH_KEY_PATHS+=("$candidate")
-    done
+    local key
+    while IFS= read -r key; do
+        [ -n "$key" ] && SSH_KEY_PATHS+=("$key")
+    done < <(list_ssh_keys)
+}
+
+# Apaga todas as chaves SSH existentes (removendo também do ssh-agent).
+delete_ssh_keys() {
+    local key
+    print_warning "Apagando chaves SSH existentes..."
+    while IFS= read -r key; do
+        [ -n "$key" ] || continue
+        ssh-add -d "$key" >/dev/null 2>&1 || true
+        rm -f "$key" "$key.pub"
+        print_success "Chave removida: $key"
+    done < <(list_ssh_keys)
 }
 
 # Testa a autenticação com o GitHub (o ssh -T sai com código 1 mesmo em
@@ -257,140 +280,182 @@ if [ ! -t 0 ]; then
         register_validation "Chaves SSH (GitHub)" check_ssh_keys
     fi
 else
-    # Quantas contas (chaves) criar: 1 ou 2
-    ssh_accounts=""
-    while [ "$ssh_accounts" != "1" ] && [ "$ssh_accounts" != "2" ]; do
-        if ! read -r -p "Quantas contas SSH/GitHub você quer configurar? (1 ou 2): " ssh_accounts; then
+    # Quantas chaves o usuário quer criar (sem limite; 0 = nenhuma)
+    ssh_count=""
+    while [ -z "$ssh_count" ]; do
+        if ! read -r -p "Quantas chaves SSH você quer configurar? (0 = nenhuma): " ssh_count; then
             echo ""
             print_error "Entrada cancelada pelo usuário."
             exit 1
         fi
-        ssh_accounts="${ssh_accounts// /}"
-        if [ "$ssh_accounts" != "1" ] && [ "$ssh_accounts" != "2" ]; then
-            print_warning "Opção inválida. Digite 1 ou 2."
+        ssh_count="${ssh_count// /}"
+        if ! [[ "$ssh_count" =~ ^[0-9]+$ ]]; then
+            print_warning "Informe um número inteiro (0 ou mais)."
+            ssh_count=""
         fi
     done
 
-    # Nome e email de cada chave (1 conta = 1 par, 2 contas = 2 pares)
-    ssh_emails=()
-    for ((i = 1; i <= ssh_accounts; i++)); do
-        # Nome da chave: usado no nome do arquivo e no alias do ~/.ssh/config
-        ssh_name=""
-        while [ -z "$ssh_name" ]; do
-            if ! read -r -p "Nome da chave ${i} de ${ssh_accounts} (ex: pessoal, trabalho): " ssh_name; then
+    # Antes de criar novas chaves, sempre pergunta se deve apagar as existentes
+    discover_ssh_keys
+    if [ "$ssh_count" -gt 0 ] && [ "${#SSH_KEY_PATHS[@]}" -gt 0 ]; then
+        print_warning "Chaves SSH existentes detectadas:"
+        printf '   %s\n' "${SSH_KEY_PATHS[@]}"
+        confirm_delete=""
+        while [ -z "$confirm_delete" ]; do
+            if ! read -r -p "Apagar as chaves existentes antes de criar as novas? (s/N): " delete_ans; then
                 echo ""
                 print_error "Entrada cancelada pelo usuário."
                 exit 1
             fi
-            ssh_name="$(printf '%s' "$ssh_name" | sed 's/[^A-Za-z0-9_-]/-/g; s/--*/-/g; s/^-//; s/-$//')"
-            if [ -z "$ssh_name" ]; then
-                print_warning "Informe um nome válido (letras, números, - ou _)."
-                continue
-            fi
-            if printf '%s\n' "${SSH_LABELS[@]}" | grep -qxF "$ssh_name"; then
-                print_warning "Nome já usado nesta execução. Escolha outro."
-                ssh_name=""
-                continue
-            fi
+            case "${delete_ans,,}" in
+                s|sim|y|yes)    confirm_delete="yes" ;;
+                n|nao|no|não|"") confirm_delete="no" ;;
+                *) print_warning "Responda sim (s) ou não (N)." ;;
+            esac
         done
-        SSH_LABELS+=("$ssh_name")
-
-        # Email: vira o comentário da chave
-        ssh_email=""
-        while [ -z "$ssh_email" ] || [[ "$ssh_email" != *@* ]]; do
-            if ! read -r -p "Email da chave ${i} de ${ssh_accounts} (comentário): " ssh_email; then
-                echo ""
-                print_error "Entrada cancelada pelo usuário."
-                exit 1
-            fi
-            if [ -z "$ssh_email" ] || [[ "$ssh_email" != *@* ]]; then
-                print_warning "Informe um email válido (ex: seu.email@exemplo.com)."
-            fi
-        done
-        ssh_emails+=("$ssh_email")
-    done
-
-    mkdir -p "$HOME/.ssh"
-    chmod 700 "$HOME/.ssh"
-
-    # Gera cada chave (mantém as que já existem)
-    for ((i = 0; i < ssh_accounts; i++)); do
-        key_path="$HOME/.ssh/id_ed25519_${SSH_LABELS[$i]}"
-
-        if [ -f "$key_path" ]; then
-            print_success "Chave já existe: $key_path"
+        if [ "$confirm_delete" = "yes" ]; then
+            delete_ssh_keys
+            SSH_KEY_PATHS=()
         else
-            ssh-keygen -t ed25519 -C "${ssh_emails[$i]}" -f "$key_path" -N "" -q
-            if [ ! -f "$key_path" ] || [ ! -f "$key_path.pub" ]; then
-                print_error "Não foi possível gerar a chave $key_path."
-                exit 1
-            fi
-            print_success "Chave gerada: $key_path (nome: ${SSH_LABELS[$i]}, email: ${ssh_emails[$i]})"
+            print_warning "Chaves existentes mantidas."
         fi
+    fi
 
-        chmod 600 "$key_path"
-        chmod 644 "$key_path.pub"
-        SSH_KEY_PATHS+=("$key_path")
-    done
+    if [ "$ssh_count" -eq 0 ]; then
+        # Nenhuma chave criada: remove o bloco gerenciado do ~/.ssh/config
+        ssh_config="$HOME/.ssh/config"
+        if [ -f "$ssh_config" ]; then
+            awk -v s="# >>> setup-linux" -v e="# <<< setup-linux" \
+                'index($0, s) == 1 { skip = 1; next } index($0, e) == 1 { skip = 0; next } !skip { print }' \
+                "$ssh_config" > "$ssh_config.tmp"
+            mv "$ssh_config.tmp" "$ssh_config"
+            chmod 600 "$ssh_config"
+            print_warning "Nenhuma chave criada; bloco gerenciado do $ssh_config removido."
+        else
+            print_warning "Nenhuma chave criada."
+        fi
+    else
+        # Nome e email de cada chave (quantas o usuário pediu)
+        ssh_emails=()
+        for ((i = 1; i <= ssh_count; i++)); do
+            # Nome da chave: usado no nome do arquivo e no alias do ~/.ssh/config
+            ssh_name=""
+            while [ -z "$ssh_name" ]; do
+                if ! read -r -p "Nome da chave ${i} de ${ssh_count} (ex: pessoal, trabalho): " ssh_name; then
+                    echo ""
+                    print_error "Entrada cancelada pelo usuário."
+                    exit 1
+                fi
+                ssh_name="$(printf '%s' "$ssh_name" | sed 's/[^A-Za-z0-9_-]/-/g; s/--*/-/g; s/^-//; s/-$//')"
+                if [ -z "$ssh_name" ]; then
+                    print_warning "Informe um nome válido (letras, números, - ou _)."
+                    continue
+                fi
+                if printf '%s\n' "${SSH_LABELS[@]}" | grep -qxF "$ssh_name"; then
+                    print_warning "Nome já usado nesta execução. Escolha outro."
+                    ssh_name=""
+                fi
+            done
+            SSH_LABELS+=("$ssh_name")
 
-    # Bloco de ~/.ssh/config (removido e reescrito a cada execução)
-    ssh_config="$HOME/.ssh/config"
-    ssh_block="# >>> setup-linux: chaves SSH GitHub >>>"
-    ssh_block+=$'\n'"Host github.com github"
-    ssh_block+=$'\n'"    HostName github.com"
-    ssh_block+=$'\n'"    User git"
-    ssh_block+=$'\n'"    IdentityFile ${SSH_KEY_PATHS[0]}"
-    ssh_block+=$'\n'"    IdentitiesOnly yes"
-    ssh_block+=$'\n'"    AddKeysToAgent yes"
+            # Email: vira o comentário da chave
+            ssh_email=""
+            while [ -z "$ssh_email" ] || [[ "$ssh_email" != *@* ]]; do
+                if ! read -r -p "Email da chave ${i} de ${ssh_count} (comentário): " ssh_email; then
+                    echo ""
+                    print_error "Entrada cancelada pelo usuário."
+                    exit 1
+                fi
+                if [ -z "$ssh_email" ] || [[ "$ssh_email" != *@* ]]; then
+                    print_warning "Informe um email válido (ex: seu.email@exemplo.com)."
+                fi
+            done
+            ssh_emails+=("$ssh_email")
+        done
 
-    # Alias nomeado para cada chave (o github.com padrão usa a primeira)
-    for ((i = 0; i < ssh_accounts; i++)); do
-        ssh_block+=$'\n'""
-        ssh_block+=$'\n'"Host github-${SSH_LABELS[$i]}"
+        mkdir -p "$HOME/.ssh"
+        chmod 700 "$HOME/.ssh"
+
+        # Gera cada chave (se o mesmo nome já existir sem ter sido apagado, reusa)
+        SSH_KEY_PATHS=()
+        for ((i = 0; i < ssh_count; i++)); do
+            key_path="$HOME/.ssh/id_ed25519_${SSH_LABELS[$i]}"
+
+            if [ -f "$key_path" ]; then
+                print_success "Chave já existe: $key_path"
+            else
+                ssh-keygen -t ed25519 -C "${ssh_emails[$i]}" -f "$key_path" -N "" -q
+                if [ ! -f "$key_path" ] || [ ! -f "$key_path.pub" ]; then
+                    print_error "Não foi possível gerar a chave $key_path."
+                    exit 1
+                fi
+                print_success "Chave gerada: $key_path (nome: ${SSH_LABELS[$i]}, email: ${ssh_emails[$i]})"
+            fi
+
+            chmod 600 "$key_path"
+            chmod 644 "$key_path.pub"
+            SSH_KEY_PATHS+=("$key_path")
+        done
+
+        # Bloco de ~/.ssh/config (removido e reescrito a cada execução)
+        ssh_config="$HOME/.ssh/config"
+        ssh_block="# >>> setup-linux: chaves SSH GitHub >>>"
+        ssh_block+=$'\n'"Host github.com github"
         ssh_block+=$'\n'"    HostName github.com"
         ssh_block+=$'\n'"    User git"
-        ssh_block+=$'\n'"    IdentityFile ${SSH_KEY_PATHS[$i]}"
+        ssh_block+=$'\n'"    IdentityFile ${SSH_KEY_PATHS[0]}"
         ssh_block+=$'\n'"    IdentitiesOnly yes"
         ssh_block+=$'\n'"    AddKeysToAgent yes"
-    done
-    ssh_block+=$'\n'"# <<< setup-linux: chaves SSH GitHub <<<"
 
-    if [ -f "$ssh_config" ]; then
-        awk -v s="# >>> setup-linux" -v e="# <<< setup-linux" \
-            'index($0, s) == 1 { skip = 1; next } index($0, e) == 1 { skip = 0; next } !skip { print }' \
-            "$ssh_config" > "$ssh_config.tmp"
-        mv "$ssh_config.tmp" "$ssh_config"
-    fi
-    printf '%s\n' "$ssh_block" >> "$ssh_config"
-    chmod 600 "$ssh_config"
-    print_success "Configuração SSH escrita em $ssh_config"
+        # Alias nomeado para cada chave (o github.com padrão usa a primeira)
+        for ((i = 0; i < ssh_count; i++)); do
+            ssh_block+=$'\n'""
+            ssh_block+=$'\n'"Host github-${SSH_LABELS[$i]}"
+            ssh_block+=$'\n'"    HostName github.com"
+            ssh_block+=$'\n'"    User git"
+            ssh_block+=$'\n'"    IdentityFile ${SSH_KEY_PATHS[$i]}"
+            ssh_block+=$'\n'"    IdentitiesOnly yes"
+            ssh_block+=$'\n'"    AddKeysToAgent yes"
+        done
+        ssh_block+=$'\n'"# <<< setup-linux: chaves SSH GitHub <<<"
 
-    register_validation "Chaves SSH (GitHub)" check_ssh_keys
-
-    # Testa a autenticação de cada conta
-    print_status "Testando conexão SSH com o GitHub..."
-    for ((i = 0; i < ssh_accounts; i++)); do
-        if [ "$ssh_accounts" -eq 1 ]; then
-            ssh_host="git@github.com"
-        else
-            ssh_host="git@github-${SSH_LABELS[$i]}"
+        if [ -f "$ssh_config" ]; then
+            awk -v s="# >>> setup-linux" -v e="# <<< setup-linux" \
+                'index($0, s) == 1 { skip = 1; next } index($0, e) == 1 { skip = 0; next } !skip { print }' \
+                "$ssh_config" > "$ssh_config.tmp"
+            mv "$ssh_config.tmp" "$ssh_config"
         fi
+        printf '%s\n' "$ssh_block" >> "$ssh_config"
+        chmod 600 "$ssh_config"
+        print_success "Configuração SSH escrita em $ssh_config"
 
-        if ssh_output="$(test_github_ssh "$ssh_host")"; then
-            print_success "$ssh_host autentica: $ssh_output"
-        else
-            print_warning "$ssh_host ainda não autentica."
-            print_warning "Adicione a chave pública abaixo no GitHub (Settings > SSH and GPG keys) e teste com: ssh -T $ssh_host"
-        fi
-    done
+        register_validation "Chaves SSH (GitHub)" check_ssh_keys
 
-    echo ""
-    print_status "Chaves públicas para adicionar no GitHub:"
-    for key_path in "${SSH_KEY_PATHS[@]}"; do
-        echo "   ${key_path}.pub"
-        echo "   $(cat "$key_path.pub")"
+        # Testa a autenticação de cada chave
+        print_status "Testando conexão SSH com o GitHub..."
+        for ((i = 0; i < ssh_count; i++)); do
+            if [ "$i" -eq 0 ]; then
+                ssh_host="git@github.com"
+            else
+                ssh_host="git@github-${SSH_LABELS[$i]}"
+            fi
+
+            if ssh_output="$(test_github_ssh "$ssh_host")"; then
+                print_success "$ssh_host autentica: $ssh_output"
+            else
+                print_warning "$ssh_host ainda não autentica."
+                print_warning "Adicione a chave pública abaixo no GitHub (Settings > SSH and GPG keys) e teste com: ssh -T $ssh_host"
+            fi
+        done
+
         echo ""
-    done
+        print_status "Chaves públicas para adicionar no GitHub:"
+        for key_path in "${SSH_KEY_PATHS[@]}"; do
+            echo "   ${key_path}.pub"
+            echo "   $(cat "$key_path.pub")"
+            echo ""
+        done
+    fi
 fi
 
 # ====================================
