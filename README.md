@@ -34,16 +34,25 @@ O script utiliza `apt` e resolve o codename do Ubuntu diretamente de `VERSION_CO
 
 ### Chaves SSH (GitHub)
 
-O script pergunta **quantas contas** você quer configurar e pede o **email de cada uma**:
+O script pergunta **quantas contas** você quer configurar e, para cada chave, o **nome** e o **email**:
 
-- **1 conta** → 1 email → chave em `~/.ssh/id_ed25519`
-- **2 contas** → 2 emails → chaves em `~/.ssh/id_ed25519_<apelido>` (apelido derivado do email)
+- **1 conta** → 1 nome + 1 email
+- **2 contas** → 2 nomes + 2 emails
 
-Para cada conta ele:
+O nome define o arquivo e o alias; o email vira o comentário da chave:
 
-- Gera a chave **ed25519** (mantém as que já existem)
+```text
+Quantas contas SSH/GitHub você quer configurar? (1 ou 2): 2
+Nome da chave 1 de 2 (ex: pessoal, trabalho): pessoal
+Email da chave 1 de 2 (comentário): alice@exemplo.com
+Nome da chave 2 de 2 (ex: pessoal, trabalho): trabalho
+Email da chave 2 de 2 (comentário): bob@trabalho.com
+```
+
+- Gera `~/.ssh/id_ed25519_<nome>` em ed25519 (mantém as chaves já existentes)
+- Nome inválido ou repetido faz o prompt se repetir (só aceita letras, números, `-` e `_`)
 - Escreve um bloco gerenciado em `~/.ssh/config` (`IdentitiesOnly yes` + `AddKeysToAgent yes`)
-- Com 2 contas, cria os aliases `github-<apelido1>` e `github-<apelido2>` (o `github.com` padrão usa a primeira chave)
+- `github.com` usa a primeira chave; cada chave ganha um alias `github-<nome>`
 - Testa a autenticação com `ssh -T` e imprime a chave pública para você colar no GitHub
 
 ### Docker
@@ -159,20 +168,25 @@ Durante a execução, o script faz apenas estas perguntas (não cadastra identid
 
 ```text
 Quantas contas SSH/GitHub você quer configurar? (1 ou 2):
-Email da conta 1 de 2 (comentário da chave):
-Email da conta 2 de 2 (comentário da chave):
+Nome da chave 1 de 2 (ex: pessoal, trabalho):
+Email da chave 1 de 2 (comentário):
+Nome da chave 2 de 2 (ex: pessoal, trabalho):
+Email da chave 2 de 2 (comentário):
 ```
+
+- **Nome** → vira o nome do arquivo e o alias no `~/.ssh/config` (só letras, números, `-` e `_`; repetido ou inválido, o prompt se repete)
+- **Email** → vira o comentário da chave (`ssh-keygen -C`)
 
 O que acontece em seguida:
 
 ```bash
-# 1 conta
-~/.ssh/id_ed25519          # chave privada
-~/.ssh/id_ed25519.pub      # chave pública (colar no GitHub)
+# 1 conta (ex: nome "pessoal")
+~/.ssh/id_ed25519_pessoal          # chave privada
+~/.ssh/id_ed25519_pessoal.pub      # chave pública (colar no GitHub)
 
-# 2 contas (ex: alice@exemplo.com e bob@trabalho.com)
-~/.ssh/id_ed25519_alice
-~/.ssh/id_ed25519_bob
+# 2 contas (ex: nomes "pessoal" e "trabalho")
+~/.ssh/id_ed25519_pessoal
+~/.ssh/id_ed25519_trabalho
 ```
 
 `~/.ssh/config` recebe um bloco gerenciado (removido e reescrito a cada execução, sem sobrescrever o resto do seu arquivo):
@@ -182,26 +196,26 @@ O que acontece em seguida:
 Host github.com github
     HostName github.com
     User git
-    IdentityFile /home/voce/.ssh/id_ed25519_alice
+    IdentityFile /home/voce/.ssh/id_ed25519_pessoal
     IdentitiesOnly yes
     AddKeysToAgent yes
 
-Host github-alice
+Host github-pessoal
     HostName github.com
     User git
-    IdentityFile /home/voce/.ssh/id_ed25519_alice
+    IdentityFile /home/voce/.ssh/id_ed25519_pessoal
     IdentitiesOnly yes
     AddKeysToAgent yes
 
-Host github-bob
+Host github-trabalho
     ...
 # <<< setup-linux: chaves SSH GitHub <<<
 ```
 
-Para usar a **segunda conta** em um repositório:
+`github.com` (ou `github`) sempre usa a **primeira** chave. Para usar a segunda conta em um repositório:
 
 ```bash
-git remote set-url origin git@github-bob:usuario/repo.git
+git remote set-url origin git@github-trabalho:usuario/repo.git
 ```
 
 O script ainda imprime a(s) chave(s) pública(s) para colar em
@@ -249,7 +263,7 @@ Zsh:        zsh 5.x.x
 Oh My Zsh:  master
 Diodon:     1.13.0
 Shell:      /usr/bin/zsh
-SSH key:    /home/voce/.ssh/id_ed25519
+SSH key:    /home/voce/.ssh/id_ed25519_pessoal
 ```
 
 ---

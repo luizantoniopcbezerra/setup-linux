@@ -202,7 +202,8 @@ fi
 # ====================================
 # 4. CHAVES SSH (GitHub)
 # Não cadastra identidade global: apenas chaves SSH para autenticação.
-# O usuário informa quantas contas vai usar (1 ou 2) e o email de cada uma.
+# O usuário informa quantas contas vai usar (1 ou 2) e, para cada chave,
+# o nome (arquivo/alias) e o email (comentário).
 # ====================================
 SSH_KEY_PATHS=()
 SSH_LABELS=()
@@ -270,12 +271,34 @@ else
         fi
     done
 
-    # Um email por conta (1 conta = 1 email, 2 contas = 2 emails)
+    # Nome e email de cada chave (1 conta = 1 par, 2 contas = 2 pares)
     ssh_emails=()
     for ((i = 1; i <= ssh_accounts; i++)); do
+        # Nome da chave: usado no nome do arquivo e no alias do ~/.ssh/config
+        ssh_name=""
+        while [ -z "$ssh_name" ]; do
+            if ! read -r -p "Nome da chave ${i} de ${ssh_accounts} (ex: pessoal, trabalho): " ssh_name; then
+                echo ""
+                print_error "Entrada cancelada pelo usuário."
+                exit 1
+            fi
+            ssh_name="$(printf '%s' "$ssh_name" | sed 's/[^A-Za-z0-9_-]/-/g; s/--*/-/g; s/^-//; s/-$//')"
+            if [ -z "$ssh_name" ]; then
+                print_warning "Informe um nome válido (letras, números, - ou _)."
+                continue
+            fi
+            if printf '%s\n' "${SSH_LABELS[@]}" | grep -qxF "$ssh_name"; then
+                print_warning "Nome já usado nesta execução. Escolha outro."
+                ssh_name=""
+                continue
+            fi
+        done
+        SSH_LABELS+=("$ssh_name")
+
+        # Email: vira o comentário da chave
         ssh_email=""
         while [ -z "$ssh_email" ] || [[ "$ssh_email" != *@* ]]; do
-            if ! read -r -p "Email da conta ${i} de ${ssh_accounts} (comentário da chave): " ssh_email; then
+            if ! read -r -p "Email da chave ${i} de ${ssh_accounts} (comentário): " ssh_email; then
                 echo ""
                 print_error "Entrada cancelada pelo usuário."
                 exit 1
@@ -287,26 +310,12 @@ else
         ssh_emails+=("$ssh_email")
     done
 
-    # Rótulo derivado do email (sem prompt extra), sem colisão entre contas
-    for ((i = 0; i < ssh_accounts; i++)); do
-        label="$(printf '%s' "${ssh_emails[$i]%@*}" | sed 's/[^A-Za-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//')"
-        [ -n "$label" ] || label="conta$((i + 1))"
-        while printf '%s\n' "${SSH_LABELS[@]}" | grep -qxF "$label"; do
-            label="${label}-$((i + 1))"
-        done
-        SSH_LABELS+=("$label")
-    done
-
     mkdir -p "$HOME/.ssh"
     chmod 700 "$HOME/.ssh"
 
     # Gera cada chave (mantém as que já existem)
     for ((i = 0; i < ssh_accounts; i++)); do
-        if [ "$ssh_accounts" -eq 1 ]; then
-            key_path="$HOME/.ssh/id_ed25519"
-        else
-            key_path="$HOME/.ssh/id_ed25519_${SSH_LABELS[$i]}"
-        fi
+        key_path="$HOME/.ssh/id_ed25519_${SSH_LABELS[$i]}"
 
         if [ -f "$key_path" ]; then
             print_success "Chave já existe: $key_path"
@@ -316,7 +325,7 @@ else
                 print_error "Não foi possível gerar a chave $key_path."
                 exit 1
             fi
-            print_success "Chave gerada: $key_path (email ${ssh_emails[$i]})"
+            print_success "Chave gerada: $key_path (nome: ${SSH_LABELS[$i]}, email: ${ssh_emails[$i]})"
         fi
 
         chmod 600 "$key_path"
@@ -334,17 +343,16 @@ else
     ssh_block+=$'\n'"    IdentitiesOnly yes"
     ssh_block+=$'\n'"    AddKeysToAgent yes"
 
-    if [ "$ssh_accounts" -eq 2 ]; then
-        for ((i = 0; i < ssh_accounts; i++)); do
-            ssh_block+=$'\n'""
-            ssh_block+=$'\n'"Host github-${SSH_LABELS[$i]}"
-            ssh_block+=$'\n'"    HostName github.com"
-            ssh_block+=$'\n'"    User git"
-            ssh_block+=$'\n'"    IdentityFile ${SSH_KEY_PATHS[$i]}"
-            ssh_block+=$'\n'"    IdentitiesOnly yes"
-            ssh_block+=$'\n'"    AddKeysToAgent yes"
-        done
-    fi
+    # Alias nomeado para cada chave (o github.com padrão usa a primeira)
+    for ((i = 0; i < ssh_accounts; i++)); do
+        ssh_block+=$'\n'""
+        ssh_block+=$'\n'"Host github-${SSH_LABELS[$i]}"
+        ssh_block+=$'\n'"    HostName github.com"
+        ssh_block+=$'\n'"    User git"
+        ssh_block+=$'\n'"    IdentityFile ${SSH_KEY_PATHS[$i]}"
+        ssh_block+=$'\n'"    IdentitiesOnly yes"
+        ssh_block+=$'\n'"    AddKeysToAgent yes"
+    done
     ssh_block+=$'\n'"# <<< setup-linux: chaves SSH GitHub <<<"
 
     if [ -f "$ssh_config" ]; then
